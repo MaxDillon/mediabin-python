@@ -1,11 +1,12 @@
 import time
+from typing import Sequence
 import typer
 
 from mediabin.daemon import Daemon
 
 class MyDaemon(Daemon):
-    def on_spawn(self):
-        self.resources = ["abc"]
+    def on_spawn(self, defaults: Sequence[str] = []):
+        self.resources = defaults
 
 
 app = typer.Typer()
