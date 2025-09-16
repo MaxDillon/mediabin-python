@@ -108,6 +108,14 @@ class Daemon:
     def is_process_running(cls) -> bool:
         return _is_running(cls.current_pid())
 
+    def on_spawn(self):
+        """
+        Placeholder method for subclasses to initialize daemon-specific resources.
+        This method is called once when the daemon process is spawned.
+        Subclasses should override this method to set up any necessary resources
+        that are unique to the daemon's operation (e.g., database connections, queues).
+        """
+        raise NotImplementedError
 
     def spawn(self) -> int:
         """Daemonize the current script using fork+setsid."""
@@ -135,6 +143,10 @@ class Daemon:
             os.dup2(log_file.fileno(), sys.stdin.fileno())
 
         self.is_daemon = True
+        try:
+            self.on_spawn()
+        except NotImplementedError:
+            pass
         # Run the daemon main loop
         self.run()
 

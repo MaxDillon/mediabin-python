@@ -3,9 +3,14 @@ import typer
 
 from mediabin.daemon import Daemon
 
+class MyDaemon(Daemon):
+    def on_spawn(self):
+        self.resources = ["abc"]
+
+
 app = typer.Typer()
 
-daemon = Daemon()
+daemon = MyDaemon()
 
 @app.callback(invoke_without_command=True)
 def main(
@@ -58,18 +63,17 @@ def ping_command():
         time.sleep(1)
     print("pong")
 
-resources = []
 
 @app.command("add")
 @daemon.command
 def add_resource(resource: str):
-    resources.append(resource)
+    daemon.resources.append(resource)
     return "ok"
 
 @app.command("list")
 @daemon.command
 def list_resource():
-    for resource in resources:
+    for resource in daemon.resources:
         print(resource)
 
 
