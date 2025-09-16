@@ -24,20 +24,13 @@ class StreamProxy(io.TextIOBase):
     def __init__(self, conn, stream_cls):
         self.conn = conn
         self.stream_cls = stream_cls
-        self.buffer = []
 
     def write(self, s):
-        self.buffer.append(s)
-        # Flush if buffer exceeds threshold or contains newline
-        if "\n" in s or sum(len(x) for x in self.buffer) > 1024:
-            self.flush()
+        send_pickle(self.conn, self.stream_cls(s))
         return len(s)
 
     def flush(self):
-        if self.buffer:
-            text = "".join(self.buffer)
-            self.buffer = []
-            send_pickle(self.conn, self.stream_cls(text))
+        pass  # no-op, every write is already sent
 
 @dataclass
 class Message:

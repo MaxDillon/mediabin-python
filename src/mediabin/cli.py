@@ -69,7 +69,8 @@ def add_resource(resource: str):
 @app.command("list")
 @daemon.command
 def list_resource():
-    print("ping")
+    for resource in resources:
+        print(resource)
 
 
 
