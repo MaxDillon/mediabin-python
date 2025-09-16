@@ -122,49 +122,94 @@ class YTDLPDownloader:
             ))
             logger.exception(f"Unhandled exception during download: {e}")
 
-    def download_generator(self, progress: bool = False, interval: float = 0.5, sample_rate: int = 1) -> Iterator[DownloadCurrentStatus]:
-        if not self._download_thread or not self._download_thread.is_alive():
+
+    def start_download(self):
+        with self._status_lock:
+            if self._download_thread and self._download_thread.is_alive():
+                logger.warning("Download already in progress.")
+                return
+            self._current_status = StatusPending() # Reset current status
+            self._download_queue.clear() # Clear any old messages
+            self._download_event.clear() # Clear old event
             self._download_thread = threading.Thread(target=self._download_target, daemon=True)
             self._download_thread.start()
-            logger.info(f"Download thread started for {self.options.url}")
+            logger.info(f"Download started for {self.options.url}")
 
+    def get_current_status(self) -> DownloadCurrentStatus:
+        with self._status_lock:
+            return self._current_status
+
+    def download_generator(self, progress: bool = False, interval: float = 0.5, sample_rate: int = 1) -> Iterator[DownloadCurrentStatus]:
+        # If download not started, start it implicitly
+        with self._status_lock:
+            if not self._download_thread or not self._download_thread.is_alive():
+                logger.info("Download not started, initiating...")
+                self.start_download()
+        
         last_yield_time = time.time()
         downloading_status_count = 0
         pbar = None # tqdm instance for this generator
 
         try:
+            # Initialize pbar if needed based on current status
+            if progress and isinstance(self.get_current_status(), StatusDownloading):
+                current_dl_status = self.get_current_status()
+                if current_dl_status.total_bytes:
+                    pbar = tqdm(total=current_dl_status.total_bytes, initial=current_dl_status.downloaded_bytes or 0, unit='B', unit_scale=True, desc=current_dl_status.filename or "Downloading")
+                else:
+                    pbar = tqdm(unit='B', unit_scale=True, desc=current_dl_status.filename or "Downloading", initial=current_dl_status.downloaded_bytes or 0)
+
             while True:
+                status_to_yield = None
+                # Acquire lock for reading from queue and checking current status
                 with self._status_lock:
-                    # Yield all accumulated statuses
-                    while self._download_queue:
-                        status = self._download_queue.pop(0)
+                    if self._download_queue:
+                        status_to_yield = self._download_queue.pop(0)
+                    else:
+                        # If queue is empty, and download is finished/errored, exit
+                        if isinstance(self._current_status, (StatusFinished, StatusError)):
+                            if pbar:
+                                pbar.close()
+                            yield self._current_status # Yield final status if not already yielded
+                            return
 
-                        # Manage tqdm within the generator if progress=True
-                        if progress and isinstance(status, StatusDownloading):
-                            if pbar is None:
-                                pbar = tqdm(total=status.total_bytes, unit='B', unit_scale=True, desc=status.filename or "Downloading")
-                            if pbar.total != status.total_bytes: # Update total if it changed
-                                pbar.total = status.total_bytes
-                                pbar.refresh()
-                            pbar.update(status.downloaded_bytes - pbar.n if status.downloaded_bytes is not None else 0)
-                            downloading_status_count += 1
-                            
-                            # Apply sample_rate for downloading statuses
-                            if sample_rate > 0 and downloading_status_count % sample_rate != 0 and status.progress < 100.0:
-                                continue # Skip yielding this downloading status
+                # If we have a status from the queue to process/yield
+                if status_to_yield:
+                    # Manage tqdm within the generator if progress=True
+                    if progress and isinstance(status_to_yield, StatusDownloading):
+                        if pbar is None:
+                            # Initialize tqdm if it wasn't initialized at the start of generator (e.g., started as pending)
+                            pbar = tqdm(total=status_to_yield.total_bytes, initial=status_to_yield.downloaded_bytes or 0, unit='B', unit_scale=True, desc=status_to_yield.filename or "Downloading")
+                        
+                        if pbar.total != status_to_yield.total_bytes: # Update total if it changed
+                            pbar.total = status_to_yield.total_bytes
+                            pbar.refresh()
+                        # Update pbar's position; handle case where initial was 0 but new is higher
+                        pbar.update((status_to_yield.downloaded_bytes or 0) - pbar.n)
+                        downloading_status_count += 1
+                        
+                        # Apply sample_rate for downloading statuses
+                        if sample_rate > 0 and downloading_status_count % sample_rate != 0 and status_to_yield.progress < 100.0:
+                            # Skip yielding this downloading status unless it's the last one or error
+                            if not isinstance(self._current_status, (StatusFinished, StatusError)):
+                                continue # Skip yielding this specific downloading status
 
-                        yield status
-                        last_yield_time = time.time()
+                    yield status_to_yield
+                    last_yield_time = time.time()
 
-                    # Check for completion/error
-                    if isinstance(self._current_status, (StatusFinished, StatusError)):
-                        if pbar:
-                            pbar.close()
-                        return # Exit generator
-
-                # Implement interval delay
-                if time.time() - last_yield_time < interval:
-                    time.sleep(max(0, interval - (time.time() - last_yield_time)))
+                # If no status was immediately available, wait for some time or for event
+                else:
+                    # If download is still active, wait for new messages or interval
+                    if self._download_thread and self._download_thread.is_alive():
+                        # Wait for a new status to be posted or for the interval to pass
+                        self._download_event.wait(timeout=interval)
+                        self._download_event.clear() # Clear event after waiting
+                    else:
+                        # If thread died unexpectedly without final status, yield error
+                        if not isinstance(self._current_status, (StatusFinished, StatusError)):
+                            yield StatusError(message="Download thread unexpectedly terminated.")
+                        return
+                
 
         except Exception as e:
             logger.exception("Error in download generator")
@@ -186,19 +231,30 @@ if __name__ == "__main__":
         options = DownloadOptions(url=download_url, output_dir=output_dir)
         downloader = YTDLPDownloader(options)
 
-        # Example usage of the generator with progress bar
         logger.info(f"Starting download for {download_url} to {output_dir}")
-        for status in downloader.download_generator(progress=True, sample_rate=5):
-            # The generator handles tqdm printing, but you can also log statuses
+        downloader.start_download() # Explicitly start the download
+
+        # Consume statuses with a generator and progress bar
+        for status in downloader.download_generator(progress=True, sample_rate=1):
             match status:
                 case StatusPending():
                     logger.info(f"Status: {status.message}")
                 case StatusDownloading():
-                    pass
+                    pass # tqdm handles printing
                 case StatusFinished():
                     logger.info(f"Download finished: {status.filename} at {status.filepath}")
                 case StatusError():
                     logger.error(f"Download error: {status.message} - {status.details}")
-                    
+        
+        logger.info("Generator finished.")
+
+        # Demonstrate checking status after generator exits
+        final_status = downloader.get_current_status()
+        logger.info(f"Final status after generator exit: {final_status}")
+
+        # You could potentially call generator again to see if new messages appeared
+        # for status in downloader.download_generator(progress=True):
+        #     logger.info(f"Second generator call status: {status}")
+
     else:
         print("Usage: python downloader.py <URL>")
