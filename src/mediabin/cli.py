@@ -1,6 +1,5 @@
+import time
 import typer
-import os
-import sys
 
 from mediabin.daemon import Daemon
 
@@ -37,7 +36,24 @@ def stop_service():
 @app.command("ping")
 @daemon.command(typer=True)
 def ping_command():
-    return "pong"
+    for i in range(4):
+        print(i)
+        time.sleep(1)
+    print("pong")
+
+resources = []
+
+@app.command("add")
+@daemon.command(typer=True)
+def add_resource(resource: str):
+    resources.append(resource)
+    return "ok"
+
+@app.command("list")
+@daemon.command(typer=True)
+def list_resource():
+    print("ping")
+
 
 
 if __name__ == "__main__":

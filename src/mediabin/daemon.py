@@ -2,7 +2,6 @@ from dataclasses import dataclass
 import os
 import socket
 import sys
-import subprocess
 import signal
 from typing import Optional
 import pickle
@@ -11,6 +10,7 @@ from typing import Any
 import threading
 from functools import wraps
 import inspect
+import io
 
 HOME_DIRECTORY = os.path.expanduser("~")
 DAEMON_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin", "daemon")
@@ -20,13 +20,38 @@ os.makedirs(DAEMON_DIRECTORY, exist_ok=True)
 PID_FILE = os.path.join(DAEMON_DIRECTORY, "process.pid")
 SOCKET_FILE = os.path.join(DAEMON_DIRECTORY, "socket.sock")
 
+class StreamProxy(io.TextIOBase):
+    def __init__(self, conn, stream_cls):
+        self.conn = conn
+        self.stream_cls = stream_cls
+        self.buffer = []
 
+    def write(self, s):
+        self.buffer.append(s)
+        # Flush if buffer exceeds threshold or contains newline
+        if "\n" in s or sum(len(x) for x in self.buffer) > 1024:
+            self.flush()
+        return len(s)
+
+    def flush(self):
+        if self.buffer:
+            text = "".join(self.buffer)
+            self.buffer = []
+            send_pickle(self.conn, self.stream_cls(text))
 
 @dataclass
 class Message:
     name: str
     args: list[Any]
     kwargs: dict[str, Any]
+
+@dataclass
+class StdoutMessage:
+    text: str
+
+@dataclass
+class StderrMessage:
+    text: str
 
 
 def send_pickle(sock: socket.socket, obj):
@@ -137,19 +162,27 @@ class Daemon:
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # client-side RPC
             message = Message(name=name, args=list(args), kwargs=kwargs)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.connect(SOCKET_FILE)
-                send_pickle(s, message)
-                result = recv_pickle(s)
-                if isinstance(result, Exception):
-                    raise result
 
-            if typer:
-                print(result)
-                return None
-            return result
+                send_pickle(s, message)
+
+                while True:
+                    response = recv_pickle(s)
+
+                    # Handle streamed stdout/stderr
+                    if isinstance(response, StdoutMessage):
+                        print(response.text, end="")
+                        continue
+                    elif isinstance(response, StderrMessage):
+                        print(response.text, end="", file=sys.stderr)
+                        continue
+
+                    # Final result
+                    if isinstance(response, Exception):
+                        raise response
+                    return response
 
         # Preserve signature for Typer
         wrapper.__signature__ = inspect.signature(func)
@@ -192,6 +225,7 @@ class Daemon:
             self.socket.close()
         sys.exit(0)
     
+
     def handle_client(self, conn, addr):
         with conn:
             print(f"Connected by {addr}")
@@ -211,7 +245,18 @@ class Daemon:
 
                 if cmd_name in self._commands:
                     try:
-                        result = self._commands[cmd_name](*args, **kwargs)
+                        # Redirect stdout/stderr to proxy that sends immediately
+                        old_stdout, old_stderr = sys.stdout, sys.stderr
+                        sys.stdout = StreamProxy(conn, StdoutMessage)
+                        sys.stderr = StreamProxy(conn, StderrMessage)
+                        try:
+                            result = self._commands[cmd_name](*args, **kwargs)
+                        finally:
+                            # Flush any remaining buffered output
+                            sys.stdout.flush()
+                            sys.stderr.flush()
+                            sys.stdout = old_stdout
+                            sys.stderr = old_stderr
                     except Exception as e:
                         result = e
                 else:
