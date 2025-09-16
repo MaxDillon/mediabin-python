@@ -137,17 +137,14 @@ class Daemon:
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if self.is_daemon:
-                result = func(*args, **kwargs)
-            else:
-                # client-side RPC
-                message = Message(name=name, args=list(args), kwargs=kwargs)
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-                    s.connect(SOCKET_FILE)
-                    send_pickle(s, message)
-                    result = recv_pickle(s)
-                    if isinstance(result, Exception):
-                        raise result
+            # client-side RPC
+            message = Message(name=name, args=list(args), kwargs=kwargs)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.connect(SOCKET_FILE)
+                send_pickle(s, message)
+                result = recv_pickle(s)
+                if isinstance(result, Exception):
+                    raise result
 
             if typer:
                 print(result)
