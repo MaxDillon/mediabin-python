@@ -1,5 +1,7 @@
+from mediabin import cli
+
 def main():
-    print("Hello from mediabin-python!")
+    cli.app()
 
 
 if __name__ == "__main__":
