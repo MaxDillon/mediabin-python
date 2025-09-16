@@ -9,6 +9,8 @@ import pickle
 import struct
 from typing import Any
 import threading
+from functools import wraps
+import inspect
 
 HOME_DIRECTORY = os.path.expanduser("~")
 DAEMON_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin", "daemon")
@@ -118,29 +120,42 @@ class Daemon:
         # Run the daemon main loop
         self.run()
 
-    def command(self, func):
+
+
+    def command(self, func=None, *, typer=False):
+        if func is None:
+            # Allow using decorator with arguments: @daemon.command(typer=True)
+            def decorator(f):
+                return self.command(f, typer=typer)
+            return decorator
+
         name = func.__name__
         if name in self._commands:
             raise ValueError(f"Command {name} already registered")
         
-        # Always register it, even if we are a client; this is harmless.
         self._commands[name] = func
 
+        @wraps(func)
         def wrapper(*args, **kwargs):
             if self.is_daemon:
-                # Running inside the server: just execute locally
-                return func(*args, **kwargs)
+                result = func(*args, **kwargs)
+            else:
+                # client-side RPC
+                message = Message(name=name, args=list(args), kwargs=kwargs)
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                    s.connect(SOCKET_FILE)
+                    send_pickle(s, message)
+                    result = recv_pickle(s)
+                    if isinstance(result, Exception):
+                        raise result
 
-            # Running on client: send RPC
-            message = Message(name=name, args=list(args), kwargs=kwargs)
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-                s.connect(SOCKET_FILE)
-                send_pickle(s, message)
-                response = recv_pickle(s)
-                if isinstance(response, Exception):
-                    raise response
-                return response
+            if typer:
+                print(result)
+                return None
+            return result
 
+        # Preserve signature for Typer
+        wrapper.__signature__ = inspect.signature(func)
         return wrapper
 
 

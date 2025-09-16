@@ -8,14 +8,6 @@ app = typer.Typer()
 
 daemon = Daemon()
 
-@daemon.command
-def do_stuff(msg: str) -> str:
-    return f"Message: {msg}"
-
-@daemon.command
-def ping() -> str:
-    return "pong"
-
 @app.command("start-service")
 def start_service():
     """
@@ -41,13 +33,11 @@ def stop_service():
     except ProcessLookupError:
         print("no service to stop")
 
-@app.command("dostuff")
-def dostuff(message: str):
-    print(do_stuff(message))
 
 @app.command("ping")
+@daemon.command(typer=True)
 def ping_command():
-    print(ping())
+    return "pong"
 
 
 if __name__ == "__main__":
