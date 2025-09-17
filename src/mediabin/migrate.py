@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # Migrations directory is project_root/migrations
-MIGRATIONS_DIR = (Path(__file__).parent / ".." / "migrations").resolve()
+MIGRATIONS_DIR = (Path(__file__).parent.parent.parent / "migrations").resolve()
 
 MIGRATION_RE = re.compile(r"^(\d+)_.*_(up|down)\.sql$")
 
@@ -92,6 +92,12 @@ def migrate_to_version(db_path, target_version):
 
     print(f"✅ Database migrated to version {target_version}")
 
+def get_hightest_version():
+    migrations = get_migration_files()
+    highest_version = max(migrations.keys()) if migrations else 0
+    return highest_version
+
+
 def main():
     parser = argparse.ArgumentParser(description="DuckDB schema migration tool")
     parser.add_argument("db", type=Path, help="Path to DuckDB database file")
@@ -100,8 +106,7 @@ def main():
 
     conn = duckdb.connect(str(args.db))
     ensure_schema_table(conn)
-    migrations = get_migration_files()
-    highest_version = max(migrations.keys()) if migrations else 0
+    highest_version = get_hightest_version()
 
     if args.version.lower() == "head":
         target_version = highest_version
