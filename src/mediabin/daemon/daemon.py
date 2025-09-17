@@ -142,6 +142,9 @@ class Daemon:
         """
         raise NotImplementedError
 
+    def on_stop(self):
+        raise NotImplementedError
+
     def spawn(self, *args, **kwargs) -> int:
         """Daemonize the current script using fork+setsid."""
         pid = os.fork()
@@ -256,6 +259,12 @@ class Daemon:
             os.remove(SOCKET_FILE)
         if self.socket:
             self.socket.close()
+        
+        try:
+            self.on_stop()
+        except NotImplementedError:
+            pass
+
         sys.exit(0)
     
 
