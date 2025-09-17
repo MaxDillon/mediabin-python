@@ -132,6 +132,8 @@ class YTDLPDownloader:
                 'noplaylist': True,  # Ensure only single video is downloaded
                 'quiet': True,  # Suppress default yt-dlp output
                 'noprogress': True,  # Suppress default yt-dlp progress bar (tqdm will manage)
+                'writethumbnail': True, # Download video thumbnail
+                'writeinfojson': True, # Download info.json
                 'postprocessors': [] # Empty postprocessors list
             }
 
