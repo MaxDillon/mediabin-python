@@ -1,9 +1,9 @@
 import time
-from typing import Sequence, Dict
+from typing import Dict
 import typer
 
 from mediabin.daemon import Daemon
-from mediabin.ytdlp_downloader.downloader import YTDLPDownloader, DownloadOptions, StatusDownloading, StatusFinished, StatusError, StatusPending
+from mediabin.ytdlp_downloader import YTDLPDownloader, DownloadOptions, StatusDownloading, StatusFinished, StatusError, StatusPending
 
 class MyDaemon(Daemon):
     def on_spawn(self, ):
