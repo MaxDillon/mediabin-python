@@ -20,17 +20,39 @@ os.makedirs(DAEMON_DIRECTORY, exist_ok=True)
 PID_FILE = os.path.join(DAEMON_DIRECTORY, "process.pid")
 SOCKET_FILE = os.path.join(DAEMON_DIRECTORY, "socket.sock")
 
-class StreamProxy(io.TextIOBase):
-    def __init__(self, conn, stream_cls):
-        self.conn = conn
+class TaggedStreamProxy(io.TextIOBase):
+    connections = {}
+
+    def __init__(self, stream_cls, fallback_log_path):
         self.stream_cls = stream_cls
+        self.lock = threading.Lock()
+        self.fallback_log_path = fallback_log_path
 
     def write(self, s):
-        send_pickle(self.conn, self.stream_cls(s))
+        tid = threading.get_ident()
+        with self.lock:
+            conn = self.connections.get(tid)
+            if conn is not None:
+                # Send over the socket
+                send_pickle(conn, self.stream_cls(s))
+            else:
+                # Fallback: write to the log file
+                with open(self.fallback_log_path, "a") as f:
+                    f.write(s)
+                    f.flush()
         return len(s)
 
     def flush(self):
-        pass  # no-op, every write is already sent
+        pass  # no-op, writes are already flushed
+
+    def tag_connection(self, conn):
+        with self.lock:
+            self.connections[threading.get_ident()] = conn
+
+    def remove_connection(self):
+        with self.lock:
+            self.connections.pop(threading.get_ident(), None)
+
 
 @dataclass
 class Message:
@@ -99,6 +121,9 @@ class Daemon:
         self.socket = None
         self.is_daemon = False
         self._commands = {}
+        self.log_path =  os.path.join(DAEMON_DIRECTORY, "log.txt")
+        self._stdout_proxy = TaggedStreamProxy(StdoutMessage, self.log_path)
+        self._stderr_proxy = TaggedStreamProxy(StderrMessage, self.log_path)
 
     @classmethod
     def current_pid(cls) -> Optional[int]:
@@ -134,15 +159,18 @@ class Daemon:
 
         # Now in the grandchild: fully daemonized
         # Redirect stdio to a log file
-        log_file_path = os.path.join(DAEMON_DIRECTORY, "log.txt")
         sys.stdout.flush()
         sys.stderr.flush()
-        with open(log_file_path, "a+") as log_file:
+        with open(self.log_path, "a+") as log_file:
             os.dup2(log_file.fileno(), sys.stdout.fileno())
             os.dup2(log_file.fileno(), sys.stderr.fileno())
             os.dup2(log_file.fileno(), sys.stdin.fileno())
 
         self.is_daemon = True
+        # Permanently redirect stdout and stderr for the daemon process
+        sys.stdout = self._stdout_proxy
+        sys.stderr = self._stderr_proxy
+
         try:
             self.on_spawn(*args, **kwargs)
         except NotImplementedError:
@@ -250,18 +278,15 @@ class Daemon:
 
                 if cmd_name in self._commands:
                     try:
-                        # Redirect stdout/stderr to proxy that sends immediately
-                        old_stdout, old_stderr = sys.stdout, sys.stderr
-                        sys.stdout = StreamProxy(conn, StdoutMessage)
-                        sys.stderr = StreamProxy(conn, StderrMessage)
+                        # Tag the connection to the thread for StreamProxy
+                        self._stdout_proxy.tag_connection(conn)
+                        self._stderr_proxy.tag_connection(conn)
                         try:
                             result = self._commands[cmd_name](*args, **kwargs)
                         finally:
-                            # Flush any remaining buffered output
-                            sys.stdout.flush()
-                            sys.stderr.flush()
-                            sys.stdout = old_stdout
-                            sys.stderr = old_stderr
+                            # Untag the connection from the thread
+                            self._stdout_proxy.remove_connection()
+                            self._stderr_proxy.remove_connection()
                     except Exception as e:
                         result = e
                 else:
