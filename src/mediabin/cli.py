@@ -94,6 +94,11 @@ def main(
 def ping_command():
     print("pong")
 
+@app.command("echo")
+@daemon.command
+def echo_command(msg: list[str]):
+    print(" ".join(msg))
+
 @app.command("install")
 @app.command("i")
 @daemon.command
