@@ -1,12 +1,13 @@
 import time
-from typing import Sequence
+from typing import Sequence, Dict
 import typer
 
 from mediabin.daemon import Daemon
+from mediabin.ytdlp_downloader.downloader import YTDLPDownloader, DownloadOptions, DownloadCurrentStatus, StatusDownloading, StatusFinished, StatusError
 
 class MyDaemon(Daemon):
-    def on_spawn(self, defaults: Sequence[str] = []):
-        self.resources = defaults
+    def on_spawn(self, ):
+        self.active_downloads: Dict[str, YTDLPDownloader] = {}
 
 
 app = typer.Typer()
@@ -64,19 +65,37 @@ def ping_command():
         time.sleep(1)
     print("pong")
 
-
-@app.command("add")
+@app.command("install")
+@app.command("i")
 @daemon.command
-def add_resource(resource: str):
-    daemon.resources.append(resource)
-    return "ok"
+def install_media(url: str = typer.Argument(..., help="The URL of the media to download.")):
+    if url in daemon.active_downloads:
+        print(f"Download for {url} is already active or in queue.")
+
+    options = DownloadOptions(url=url)
+    downloader = YTDLPDownloader(options)
+    daemon.active_downloads[url] = downloader
+    downloader.start_download()
+    print(f"Started download for {url}. Check status with 'mb list'.")
 
 @app.command("list")
+@app.command("ls")
 @daemon.command
-def list_resource():
-    for resource in daemon.resources:
-        print(resource)
+def list_downloads():
+    if not daemon.active_downloads:
+        return "No active downloads."
 
+    output = ["Active Downloads:"]
+    for url, downloader in daemon.active_downloads.items():
+        status = downloader.get_current_status()
+        match status:
+            case StatusDownloading():
+                output.append(f"  - {url}: DOWNLOADING {status.progress:.2f}% ({status.downloaded_bytes / (1024*1024):.2f}MiB/{status.total_bytes / (1024*1024):.2f}MiB) Speed: {status.speed} ETA: {status.eta}")
+            case StatusFinished():
+                output.append(f"  - {url}: FINISHED to {status.filepath}")
+            case StatusError():
+                output.append(f"  - {url}: ERROR: {status.message} ({status.details})")
+    print("\n".join(output))
 
 
 if __name__ == "__main__":
