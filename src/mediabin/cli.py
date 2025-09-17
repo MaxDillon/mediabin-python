@@ -62,7 +62,7 @@ def main(
     ctx: typer.Context,
     start_service: bool = typer.Option(False, "--start-service", help="Starts the mediabin daemon service."),
     stop_service: bool = typer.Option(False, "--stop-service", help="Stops the mediabin daemon service."),
-    restart_service: bool = typer.Option(False, "--restart-service", help="Restarts the mediabin daemon service (stops then starts)."),
+    restart_service: bool = typer.Option(False, "--restart-service", "-r",  help="Restarts the mediabin daemon service (stops then starts)."),
 ):
     if ctx.invoked_subcommand is not None:
         return
