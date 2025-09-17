@@ -3,7 +3,7 @@ from typing import Sequence, Dict
 import typer
 
 from mediabin.daemon import Daemon
-from mediabin.ytdlp_downloader.downloader import YTDLPDownloader, DownloadOptions, DownloadCurrentStatus, StatusDownloading, StatusFinished, StatusError
+from mediabin.ytdlp_downloader.downloader import YTDLPDownloader, DownloadOptions, StatusDownloading, StatusFinished, StatusError, StatusPending
 
 class MyDaemon(Daemon):
     def on_spawn(self, ):
@@ -95,6 +95,9 @@ def list_downloads():
                 output.append(f"  - {url}: FINISHED to {status.filepath}")
             case StatusError():
                 output.append(f"  - {url}: ERROR: {status.message} ({status.details})")
+            case StatusPending():
+                output.append(f"  - {url}: PENDING")
+
     print("\n".join(output))
 
 
