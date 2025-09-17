@@ -3,6 +3,8 @@ import os
 import threading
 import time
 import logging
+import hashlib
+import base64
 from dataclasses import dataclass, field
 from typing import Optional, Any, Callable, Dict, Iterator
 from enum import Enum
@@ -13,6 +15,25 @@ from tqdm import tqdm # Keep tqdm import for now, will be used in generator
 # Configure logging for the module
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
+
+class CustomDownloader(YoutubeDL):
+    def process_info(self, info_dict):
+        video_id = info_dict['id']
+        extractor = info_dict['extractor']
+        unique_id_str = f"{extractor}-{video_id}"
+        md5_hash_digest = hashlib.md5(unique_id_str.encode('utf-8')).digest()
+        md5_b32 = base64.b32encode(md5_hash_digest).decode('utf-8').rstrip('=').upper()
+        md5_hex = md5_hash_digest.hex()
+
+        info_dict['b1_b32'] = md5_b32[:2]
+        info_dict['b2_b32'] = md5_b32[2:4]
+
+        info_dict['b1_hex'] = md5_hex[:2]
+        info_dict['b2_hex'] = md5_hex[2:4]
+
+        info_dict['hash_b32'] = md5_b32 # Store the full base32 hash
+        info_dict['hash_hex'] = md5_hex # Store the full base32 hash
+        return super().process_info(info_dict)
 
 @dataclass
 class DownloadOptions:
@@ -102,18 +123,19 @@ class YTDLPDownloader:
         self._download_queue.clear() # Clear queue for new download
         self._post_status(StatusPending())
 
+    
         try:
             ydl_opts = {
-                'outtmpl': os.path.join(self.options.output_dir, '%(id)s.%(ext)s'),
+                'outtmpl': os.path.join(self.options.output_dir, '%(b1_b32)s/%(b2_b32)s/%(hash_b32)s/video.%(ext)s'),
                 'format': 'best',
                 'progress_hooks': [self._progress_hook],
                 'noplaylist': True,  # Ensure only single video is downloaded
                 'quiet': True,  # Suppress default yt-dlp output
                 'noprogress': True,  # Suppress default yt-dlp progress bar (tqdm will manage)
-                'postprocessors': [] # Ensure no unexpected post-processing interferes
+                'postprocessors': [] # Empty postprocessors list
             }
 
-            with YoutubeDL(ydl_opts) as ydl:
+            with CustomDownloader(ydl_opts) as ydl: # Use MyYDL instead of YoutubeDL
                 ydl.download([self.options.url])
         except Exception as e:
             self._post_status(StatusError(
