@@ -113,7 +113,7 @@ def list_downloads():
     output = []
 
     if not daemon.active_downloads and daemon.download_queue.empty() and not daemon.completed_downloads:
-        return "No downloads in progress, queued, or completed."
+        print("No downloads in progress, queued, or completed.")
 
     if daemon.active_downloads:
         output.append("Active Downloads:")

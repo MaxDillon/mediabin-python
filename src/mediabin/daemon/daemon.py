@@ -11,6 +11,7 @@ import threading
 from functools import wraps
 import inspect
 import io
+import time
 
 HOME_DIRECTORY = os.path.expanduser("~")
 DAEMON_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin", "daemon")
@@ -121,9 +122,11 @@ class Daemon:
         self.socket = None
         self.is_daemon = False
         self._commands = {}
-        self.log_path =  os.path.join(DAEMON_DIRECTORY, "log.txt")
+        self.log_path = os.path.join(DAEMON_DIRECTORY, "log.txt")
         self._stdout_proxy = TaggedStreamProxy(StdoutMessage, self.log_path)
         self._stderr_proxy = TaggedStreamProxy(StderrMessage, self.log_path)
+        self._stop_event = threading.Event()
+        self._client_threads: list[threading.Thread] = []
 
     @classmethod
     def current_pid(cls) -> Optional[int]:
@@ -226,22 +229,32 @@ class Daemon:
 
 
     @classmethod
-    def stop(cls) -> None:
+    def stop(cls, timeout: float = 10.0) -> None:
         pid = cls.current_pid()
         if pid is None:
-            return print("Daemon not running (PID file not found).")
+            print("Daemon not running (PID file not found).")
+            return
 
         try:
             os.kill(pid, signal.SIGTERM)
             print(f"Sent SIGTERM to daemon with PID: {pid}")
+
+            # Wait for process to exit
+            start = time.time()
+            while time.time() - start < timeout:
+                if not _is_running(pid):
+                    break
+                time.sleep(0.1)
+            else:
+                print(f"Daemon did not stop within {timeout} seconds.")
+                return
         except ProcessLookupError:
             print("Daemon not running (Process not found).")
         finally:
-            try:
+            if os.path.exists(PID_FILE):
                 os.remove(PID_FILE)
-            except OSError:
-                pass
-
+            print("Daemon stopped cleanly.")
+ 
     @classmethod
     def send_message(cls, message: Message) -> Any:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
@@ -250,23 +263,6 @@ class Daemon:
             response = recv_pickle(s)     # wait for server response
             return response
 
-
-    def _cleanup(self, signum, frame):
-        print("Daemon shutting down...")
-        if os.path.exists(PID_FILE):
-            os.remove(PID_FILE)
-        if os.path.exists(SOCKET_FILE):
-            os.remove(SOCKET_FILE)
-        if self.socket:
-            self.socket.close()
-        
-        try:
-            self.on_stop()
-        except NotImplementedError:
-            pass
-
-        sys.exit(0)
-    
 
     def handle_client(self, conn, addr):
         with conn:
@@ -308,6 +304,19 @@ class Daemon:
                     break
 
 
+    def _cleanup(self, signum=None, frame=None):
+        print("Daemon shutting down...")
+
+        self._stop_event.set()  # signal main loop to stop
+
+        # Close listening socket so accept() unblocks
+        if self.socket:
+            try:
+                self.socket.close()
+            except Exception:
+                pass
+    
+
     def run(self):
         # Register signal handlers
         signal.signal(signal.SIGTERM, self._cleanup)
@@ -328,10 +337,33 @@ class Daemon:
         print(f"Daemon listening on {SOCKET_FILE}")
 
         try:
-            while True:
-                conn, addr = self.socket.accept()
-                threading.Thread(target=self.handle_client, args=(conn, addr), daemon=True).start()
+            while not self._stop_event.is_set():
+                try:
+                    conn, addr = self.socket.accept()
+                except OSError:
+                    # Happens if socket was closed during shutdown
+                    break
+
+                t = threading.Thread(
+                    target=self.handle_client, args=(conn, addr), daemon=False
+                )
+                self._client_threads.append(t)
+                t.start()
         finally:
-            self.socket.close()
+            # Wait for all client threads to finish
+            for t in self._client_threads:
+                t.join(timeout=1)
+
+            # Run subclass cleanup hook
+            try:
+                self.on_stop()
+            except NotImplementedError:
+                pass
+
+            # Remove files
+            if os.path.exists(PID_FILE):
+                os.remove(PID_FILE)
             if os.path.exists(SOCKET_FILE):
                 os.remove(SOCKET_FILE)
+
+            print("Daemon fully stopped")
