@@ -35,11 +35,11 @@ class MediabinDaemon(Daemon):
         if ledgerpath is None:
             if os.path.exists(LAST_LEDGERPATH_FILE):
                 with open(LAST_LEDGERPATH_FILE, "r") as f:
-                    self.ledgerpath = f.read().strip()
+                    self.ledgerpath = os.path.abspath(f.read().strip())
             else:
-                self.ledgerpath = os.path.join(MEDIABIN_DIRECTORY, "ledger.db")
+                self.ledgerpath = os.path.abspath(os.path.join(MEDIABIN_DIRECTORY, "ledger.db"))
         else:
-            self.ledgerpath = ledgerpath
+            self.ledgerpath = os.path.abspath(ledgerpath)
         
         with open(LAST_LEDGERPATH_FILE, "w") as f:
             f.write(self.ledgerpath)
@@ -83,7 +83,7 @@ class MediabinDaemon(Daemon):
         if datadir_result and datadir_result[0] is not None:
             datadir: str = datadir_result[0]
         else:
-            datadir = os.path.join(os.path.dirname(self.ledgerpath), "media_data")
+            datadir = os.path.abspath(os.path.join(os.path.dirname(self.ledgerpath), "media_data"))
             self.db.execute(
                 "INSERT INTO metadata (datadir_location) VALUES (?)",
                 (datadir,),
