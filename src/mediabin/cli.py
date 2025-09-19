@@ -1,29 +1,32 @@
 from typing import Optional, Any
-import typer
+import click
 
 from mediabin import coloring
 from mediabin.mediabin_daemon import MediabinDaemon
 
-app = typer.Typer()
 
 daemon = MediabinDaemon() # Instantiate MediabinDaemon
 
-@app.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
-    start_service: bool = typer.Option(False, "--start-service", help="Starts the mediabin daemon service."),
-    stop_service: bool = typer.Option(False, "--stop-service", help="Stops the mediabin daemon service."),
-    restart_service: bool = typer.Option(False, "--restart-service", "-r",  help="Restarts the mediabin daemon service (stops then starts)."),
-    ledger_path: Optional[str] = typer.Option(None, "--ledger-path", help="Path to the DuckDB ledger file."),
+@click.group(invoke_without_command=True)
+@click.pass_context
+@click.option("--start-service", is_flag=True, help="Starts the mediabin daemon service.")
+@click.option("--stop-service", is_flag=True, help="Stops the mediabin daemon service.")
+@click.option("--restart-service", "-r", is_flag=True, help="Restarts the mediabin daemon service (stops then starts).")
+@click.option("--ledger-path", default=None, help="Path to the DuckDB ledger file.")
+def app(
+    ctx: click.Context,
+    start_service: bool,
+    stop_service: bool,
+    restart_service: bool,
+    ledger_path: Optional[str]
 ):
     if ctx.invoked_subcommand is not None:
         return
     service_options = [start_service, stop_service, restart_service]
     if sum(service_options) > 1:
-        raise typer.BadParameter("Cannot specify more than one of --start-service, --stop-service, or --restart-service.")
+        raise click.BadParameter("Cannot specify more than one of --start-service, --stop-service, or --restart-service.")
     elif sum(service_options) == 0:
-        cli = typer.main.get_command(app)
-        typer.echo(cli.get_help(ctx))  # reuse the current ctx here
+        click.echo(ctx.get_help())  # reuse the current ctx here
 
     if stop_service or restart_service:
         print("Stopping mediabin daemon service...")
@@ -35,7 +38,7 @@ def main(
     if start_service or restart_service:
         if daemon.is_process_running():
             print(f"Daemon is already running")
-            raise typer.Exit(code=1)
+            raise click.Exit(code=1)
         print("Starting mediabin daemon service...")
         # Pass ledger_path to the spawn method
         pid = daemon.spawn(ledgerpath=ledger_path)
@@ -49,11 +52,12 @@ def ping_command():
 
 @app.command("echo")
 @daemon.command
-def echo_command(msg: list[str]):
+@click.argument('msg', nargs=-1)
+def echo_command(msg: Any):
     print(" ".join(msg))
 
-@app.command("install")
 @app.command("i")
+@click.argument('url')
 @daemon.command
 def install_media(url):
     # Call the daemon's method to add the download job
