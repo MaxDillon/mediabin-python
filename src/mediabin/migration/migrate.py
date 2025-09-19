@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # Migrations directory is project_root/migrations
-MIGRATIONS_DIR = (Path(__file__).parent.parent.parent / "migrations").resolve()
+MIGRATIONS_DIR = (Path(__file__).parent / "versions").resolve()
 
 MIGRATION_RE = re.compile(r"^(\d+)_.*_(up|down)\.sql$")
 

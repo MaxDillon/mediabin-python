@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from mediabin.daemon import Daemon
 import os
 import duckdb
-from mediabin.migrate import ensure_schema_table
+from mediabin.migration import ensure_schema_table
 import threading
 import os
 import duckdb
@@ -70,7 +70,7 @@ class MediabinDaemon(Daemon):
         conn = duckdb.connect(self.ledgerpath)
         ensure_schema_table(conn)
         # Ensure schema is up to date
-        from mediabin.migrate import migrate_to_version, get_hightest_version
+        from mediabin.migration import migrate_to_version, get_hightest_version
 
         highest_version = get_hightest_version()
         version = highest_version
