@@ -13,3 +13,6 @@ dependencies = [
 
 [project.scripts]
 mb = "mediabin.cli:app"
+
+[tool.setuptools.package-data]
+"mediabin" = ["migration/versions/*.sql"]
