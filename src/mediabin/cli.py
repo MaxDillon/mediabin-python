@@ -1,6 +1,7 @@
 from typing import Optional, Any
 import typer
 
+from mediabin import coloring
 from mediabin.mediabin_daemon import MediabinDaemon
 
 app = typer.Typer()
@@ -64,10 +65,16 @@ def install_media(url):
 def list_current_proces():
     procs = daemon.list_current_procs()
     for title, status in procs.current_jobs:
-        print(f"({status.progress:6.2f}%) {title}")
+        if status.progress < 30:
+            color = coloring.RED
+        elif status.progress < 60:
+            color = coloring.YELLOW
+        else:
+            color = coloring.GREEN 
+        print(f"[{color}{status.progress:6.2f}%{coloring.RESET}] {title}")
 
     for title, _ in procs.pending_jobs:
-        print(f"(pending) {title}")
+        print(f"[{coloring.MEDIUM_GRAY}pending{coloring.RESET}] {title}")
 
 
 @app.command("ls")
