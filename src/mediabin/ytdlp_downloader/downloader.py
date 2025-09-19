@@ -240,7 +240,7 @@ class YTDLPDownloader:
 
 
     @staticmethod
-    def get_info(url: str) -> Optional[VideoInfo]:
+    def fetch_info(url: str) -> Optional[VideoInfo]:
         """
         Retrieve video metadata (yt-dlp info_dict) for the given URL
         without downloading the media file. This is a blocking call.
@@ -270,3 +270,6 @@ class YTDLPDownloader:
         except Exception as e:
             logger.exception(f"Failed to retrieve info for {url}: {e}")
             return None
+
+    def info(self) -> VideoInfo:
+        return self.infodict

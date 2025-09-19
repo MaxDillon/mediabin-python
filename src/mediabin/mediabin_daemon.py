@@ -41,7 +41,7 @@ class MediabinDaemon(Daemon):
         self.exit_event = threading.Event()
 
         self.max_concurrent_downloads = 3
-        self.current_downloads = set()
+        self.current_downloads: Set[YTDLPDownloader] = set()
         self._lock_current_downloads = threading.Lock()
 
     def _init_db(self):
@@ -73,7 +73,7 @@ class MediabinDaemon(Daemon):
 
 
     def register_new_download(self, url):
-        info = YTDLPDownloader.get_info(url)
+        info = YTDLPDownloader.fetch_info(url)
 
         # starts downloader process, returns info of started process
         if info is None:
@@ -123,5 +123,25 @@ class MediabinDaemon(Daemon):
                 self.new_in_queue.clear()
             
             with self._lock_current_downloads:
-                pass
+                for job in self.current_downloads:
+                    status = job.get_current_status()
+                    info = job.info()
+
+                    match status:
+                        case StatusError():
+                            self.db.execute("UPDATE media.media SET status = 'error' WHERE id = ?", (info.hash_hex,))
+                            self.current_downloads.remove(job)
+                        case StatusFinished():
+                            self.db.execute("UPDATE media.media SET status = 'complete' WHERE id = ?", (info.hash_hex,))
+                            self.current_downloads.remove(job)
                 
+                if len(self.current_downloads) < self.max_concurrent_downloads:
+                    next_vals = self.db.sql("SELECT id, original_url FROM media.media WHERE status = 'pending'").fetchone()
+                    if next_vals is None:
+                        return
+                    
+                    id, url = next_vals
+                    self.db.execute("UPDATE media.media SET status = 'downloading' WHERE id = ?", (id,))
+                    new_job = YTDLPDownloader(DownloadOptions(url, self.datadir))
+                    self.current_downloads.add(new_job)
+                    new_job.start_download()
