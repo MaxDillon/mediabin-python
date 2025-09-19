@@ -80,7 +80,9 @@ def list_current_proces():
 @app.command("ls")
 @daemon.command
 def list_media():
-    daemon.list_media()
+    titles = daemon.list_media()
+    for title in titles:
+        print(f"- {title}")
 
 if __name__ == "__main__":
     app()
