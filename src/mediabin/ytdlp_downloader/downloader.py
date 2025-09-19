@@ -17,6 +17,10 @@ logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 class CustomDownloader(YoutubeDL):
+    def __init__(self, *args, info_callback: Optional[Callable[[Dict[str, Any]], None]] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.info_callback = info_callback
+
     def process_info(self, info_dict):
         video_id = info_dict['id']
         extractor = info_dict['extractor']
@@ -33,6 +37,8 @@ class CustomDownloader(YoutubeDL):
 
         info_dict['hash_b32'] = md5_b32 # Store the full base32 hash
         info_dict['hash_hex'] = md5_hex # Store the full base32 hash
+        if self.info_callback:
+            self.info_callback(info_dict)
         return super().process_info(info_dict)
 
 @dataclass
@@ -117,13 +123,12 @@ class YTDLPDownloader:
                 details=str(d.get('error'))
             ))
 
-    def _download_target(self):
+    def _download_target(self, info_callback: Optional[Callable[[Dict[str, Any]], None]] = None):
         # Reset event for new download
         self._download_event.clear()
         self._download_queue.clear() # Clear queue for new download
         self._post_status(StatusPending())
 
-    
         try:
             ydl_opts = {
                 'outtmpl': os.path.join(self.options.output_dir, '%(b1_b32)s/%(b2_b32)s/%(hash_b32)s/video.%(ext)s'),
@@ -137,7 +142,7 @@ class YTDLPDownloader:
                 'postprocessors': [] # Empty postprocessors list
             }
 
-            with CustomDownloader(ydl_opts) as ydl: # Use MyYDL instead of YoutubeDL
+            with CustomDownloader(ydl_opts, info_callback=info_callback) as ydl: # Pass info_callback here
                 ydl.download([self.options.url])
         except Exception as e:
             self._post_status(StatusError(
@@ -147,17 +152,32 @@ class YTDLPDownloader:
             logger.exception(f"Unhandled exception during download: {e}")
 
 
-    def start_download(self):
+    def start_download(self) -> Optional[Dict[str, Any]]:
+        # Event and storage for info_dict
+        info_dict_ready_event = threading.Event()
+        _info_dict_storage: Dict[str, Any] = {}
+
+        def _info_callback(info_dict: Dict[str, Any]):
+            _info_dict_storage.update(info_dict)
+            info_dict_ready_event.set()
+
         with self._status_lock:
             if self._download_thread and self._download_thread.is_alive():
                 logger.warning("Download already in progress.")
-                return
+                return None
             self._current_status = StatusPending() # Reset current status
             self._download_queue.clear() # Clear any old messages
             self._download_event.clear() # Clear old event
-            self._download_thread = threading.Thread(target=self._download_target, daemon=True)
+            self._download_thread = threading.Thread(target=self._download_target, args=(_info_callback,), daemon=True)
             self._download_thread.start()
             logger.info(f"Download started for {self.options.url}")
+        
+        if info_dict_ready_event.wait():
+            logger.info("Info dict processed and returned.")
+            return _info_dict_storage
+        else:
+            logger.warning("Unexpected event exit before complete.")
+            return None
 
     def get_current_status(self) -> DownloadCurrentStatus:
         with self._status_lock:
