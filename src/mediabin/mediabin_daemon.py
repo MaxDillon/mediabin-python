@@ -148,6 +148,10 @@ class MediabinDaemon(Daemon):
                     del self.current_statuses[info.hash_hex]
 
     def on_stop(self):
+        with self._lock_current_downloads:
+            for job in self.current_downloads.values():
+                job.cancel_download()
+
         self.exit_event.set()
         self._worker_thread.join()
 

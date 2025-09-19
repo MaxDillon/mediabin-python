@@ -9,6 +9,7 @@ from typing import Optional, Any, Callable, Dict, Iterator
 from enum import Enum
 import time # Added for time.time()
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadCancelled
 
 # Configure logging for the module
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
@@ -134,6 +135,7 @@ class YTDLPDownloader:
         self._download_event = threading.Event() # Event to signal download completion/error
         self._download_queue = [] # Queue for statuses to be consumed by generator
         self._download_thread: Optional[threading.Thread] = None
+        self._cancel_event = threading.Event()
 
         self.status_callbacks = set()
         self._last_progress_update_time = 0.0
@@ -153,6 +155,9 @@ class YTDLPDownloader:
             cb(self.infodict, status)
 
     def _progress_hook(self, d):
+        if self._cancel_event.is_set():
+            raise DownloadCancelled("Download cancelled by user.")
+        
         if d['status'] == 'downloading':
             current_time = time.time()
             if (current_time - self._last_progress_update_time) < self._progress_update_interval:
@@ -191,6 +196,7 @@ class YTDLPDownloader:
         # Reset event for new download
         self._download_event.clear()
         self._download_queue.clear() # Clear queue for new download
+        self._cancel_event.clear() # Clear cancel event for new download
         self._post_status(StatusPending())
 
         def info_callback(infodict):
@@ -211,6 +217,9 @@ class YTDLPDownloader:
 
             with CustomDownloader(ydl_opts, info_callback=info_callback) as ydl:
                 ydl.download([self.options.url])
+        except DownloadCancelled:
+            logger.info(f"Download of {self.options.url} was cancelled.")
+            self._post_status(StatusPending(message="Download cancelled"))
         except Exception as e:
             self._post_status(StatusError(
                 message=f"Unhandled exception during download of {self.options.url}",
@@ -232,7 +241,15 @@ class YTDLPDownloader:
             self._download_thread = threading.Thread(target=self._download_target, daemon=False)
             self._download_thread.start()
             logger.info(f"Download started for {self.options.url}")
-        
+    
+    def cancel_download(self):
+        with self._status_lock:
+            if self._download_thread and self._download_thread.is_alive():
+                logger.info(f"Attempting to cancel download for {self.options.url}")
+                self._cancel_event.set() # Signal the download to cancel
+            else:
+                logger.info(f"No active download to cancel for {self.options.url}")
+
 
     def get_current_status(self) -> DownloadCurrentStatus:
         with self._status_lock:
