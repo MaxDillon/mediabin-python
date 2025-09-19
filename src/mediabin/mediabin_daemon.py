@@ -80,17 +80,10 @@ class MediabinDaemon(Daemon):
             print(f"Failed to get url {url}")
             return
 
-        id = info.get("hash_hex")
-        if id is None:
+        if info.hash_hex is None:
             print(f"Failed to get url {url}")
             return
 
-        title = info.get("title")
-        origin_url = info.get("original_url", url)
-        video_url = info.get("url")
-        thumbnail_url = info.get("thumbnail")
-        timestamp_created = datetime.fromtimestamp(int(info.get("timestamp")))
-        
         try:
             self.db.execute(
                 """INSERT INTO media.media (
@@ -102,7 +95,7 @@ class MediabinDaemon(Daemon):
                     timestamp_created,
                     status
                 ) VALUES (?, ?, ?, ?, ?, ?, 'pending')""", 
-                (id, title, origin_url, video_url, thumbnail_url, timestamp_created)
+                (info.hash_hex, info.title, info.webpage_url, info.video_url, info.thumbnail, info.timestamp)
             )
         except duckdb.ConstraintException:
             print(f"{url} is already downloaded or is currently in the queue")

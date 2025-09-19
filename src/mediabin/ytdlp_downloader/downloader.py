@@ -8,13 +8,34 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Callable, Dict, Iterator
 from enum import Enum
 import time # Added for time.time()
-
 from yt_dlp import YoutubeDL
-from tqdm import tqdm # Keep tqdm import for now, will be used in generator
 
 # Configure logging for the module
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
+
+
+# Dataclass to represent relevant video information
+@dataclass
+class VideoInfo:
+    id: str
+    title: str
+    uploader: Optional[str] = None
+    timestamp: Optional[int] = None
+    description: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: Optional[int] = None
+    webpage_url: Optional[str] = None
+    video_url: Optional[str] = None # Direct URL to the video file
+    extractor: Optional[str] = None
+    extractor_key: Optional[str] = None
+    channel: Optional[str] = None
+    channel_id: Optional[str] = None
+    upload_date: Optional[str] = None # YYYYMMDD format
+    # Custom fields added by enrich_infodict
+    hash_b32: Optional[str] = None
+    hash_hex: Optional[str] = None
+
 
 def enrich_infodict(info_dict):
     video_id = info_dict['id']
@@ -33,6 +54,31 @@ def enrich_infodict(info_dict):
     info_dict['hash_b32'] = md5_b32 # Store the full base32 hash
     info_dict['hash_hex'] = md5_hex # Store the full base32 hash
     return info_dict
+
+
+def create_video_info_from_dict(info_dict: Dict[str, Any]) -> VideoInfo:
+    if 'hash_b32' not in info_dict:
+        info_dict = enrich_infodict(info_dict)
+
+    return VideoInfo(
+        id=info_dict.get('id'),
+        title=info_dict.get('title'),
+        uploader=info_dict.get('uploader'),
+        timestamp=info_dict.get('timestamp'),
+        description=info_dict.get('description'),
+        thumbnail=info_dict.get('thumbnail'),
+        duration=info_dict.get('duration'),
+        webpage_url=info_dict.get('webpage_url'),
+        video_url=info_dict.get('url'), # In some cases, 'url' directly points to the video file
+        extractor=info_dict.get('extractor'),
+        extractor_key=info_dict.get('extractor_key'),
+        channel=info_dict.get('channel'),
+        channel_id=info_dict.get('channel_id'),
+        upload_date=info_dict.get('upload_date'),
+        hash_b32=info_dict.get('hash_b32'),
+        hash_hex=info_dict.get('hash_hex'),
+    )
+
 
 class CustomDownloader(YoutubeDL):
     def __init__(self, *args, info_callback: Optional[Callable[[Dict[str, Any]], None]] = None, **kwargs):
@@ -82,7 +128,7 @@ DownloadCurrentStatus = StatusPending | StatusDownloading | StatusFinished | Sta
 class YTDLPDownloader:
     def __init__(self, options: DownloadOptions):
         self.options = options
-        self.infodict: Optional[Dict[str, Any]] = None
+        self.infodict: Optional[VideoInfo] = None
         self._current_status: DownloadCurrentStatus = StatusPending()
         self._status_lock = threading.Lock()
         self._download_event = threading.Event() # Event to signal download completion/error
@@ -138,7 +184,7 @@ class YTDLPDownloader:
                 details=str(d.get('error'))
             ))
     
-    def register_status_callback(self, cb: Callable[[Optional[Dict[str, Any]], DownloadCurrentStatus], Any]):
+    def register_status_callback(self, cb: Callable[[Optional[VideoInfo], DownloadCurrentStatus], Any]):
         self.status_callbacks.add(cb)
 
     def _download_target(self):
@@ -148,7 +194,7 @@ class YTDLPDownloader:
         self._post_status(StatusPending())
 
         def info_callback(infodict):
-            self.infodict = infodict
+            self.infodict = create_video_info_from_dict(infodict)
 
         try:
             ydl_opts = {
@@ -194,7 +240,7 @@ class YTDLPDownloader:
 
 
     @staticmethod
-    def get_info(url: str) -> Optional[Dict[str, Any]]:
+    def get_info(url: str) -> Optional[VideoInfo]:
         """
         Retrieve video metadata (yt-dlp info_dict) for the given URL
         without downloading the media file. This is a blocking call.
@@ -220,7 +266,7 @@ class YTDLPDownloader:
             }
             with YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(url, download=False)
-                return enrich_infodict(info_dict)
+                return create_video_info_from_dict(info_dict)
         except Exception as e:
             logger.exception(f"Failed to retrieve info for {url}: {e}")
             return None
