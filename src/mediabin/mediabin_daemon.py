@@ -41,7 +41,7 @@ class MediabinDaemon(Daemon):
 
     def _init_db(self):
         conn = duckdb.connect(self.ledgerpath)
-        ensure_schema_table(self.db)
+        ensure_schema_table(conn)
         # Ensure schema is up to date
         from mediabin.migrate import migrate_to_version, get_hightest_version
 
