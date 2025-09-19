@@ -20,6 +20,7 @@ def app(
     restart_service: bool,
     ledger_path: Optional[str]
 ):
+    """Mediabin CLI for managing media downloads and daemon service."""
     if ctx.invoked_subcommand is not None:
         return
     service_options = [start_service, stop_service, restart_service]
@@ -45,21 +46,11 @@ def app(
         print(f"Started with pid: {pid}")
 
 
-@app.command("ping")
-@daemon.command
-def ping_command():
-    print("pong")
-
-@app.command("echo")
-@daemon.command
-@click.argument('msg', nargs=-1)
-def echo_command(msg: Any):
-    print(" ".join(msg))
-
 @app.command("i")
 @click.argument('url')
 @daemon.command
 def install_media(url):
+    """Adds a URL to the download queue."""
     # Call the daemon's method to add the download job
     daemon.register_new_download(url=url)
     print(f"Added {url} to download queue. Check status with 'mb list'.")
@@ -67,6 +58,7 @@ def install_media(url):
 @app.command("ps")
 @daemon.command
 def list_current_proces():
+    """Lists current and pending download processes."""
     procs = daemon.list_current_procs()
     for title, status in procs.current_jobs:
         if status.progress < 30:
@@ -84,6 +76,7 @@ def list_current_proces():
 @app.command("ls")
 @daemon.command
 def list_media():
+    """Lists all downloaded media."""
     titles = daemon.list_media()
     for title in titles:
         print(f"- {title}")
