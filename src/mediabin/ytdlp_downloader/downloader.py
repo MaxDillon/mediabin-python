@@ -1,13 +1,13 @@
 import sys
 import os
 import threading
-import time
 import logging
 import hashlib
 import base64
 from dataclasses import dataclass, field
 from typing import Optional, Any, Callable, Dict, Iterator
 from enum import Enum
+import time # Added for time.time()
 
 from yt_dlp import YoutubeDL
 from tqdm import tqdm # Keep tqdm import for now, will be used in generator
@@ -90,7 +90,8 @@ class YTDLPDownloader:
         self._download_thread: Optional[threading.Thread] = None
 
         self.status_callbacks = set()
-        
+        self._last_progress_update_time = 0.0
+        self._progress_update_interval = 0.5 # seconds
 
     def _post_status(self, status: DownloadCurrentStatus):
         with self._status_lock:
@@ -106,10 +107,12 @@ class YTDLPDownloader:
             cb(self.infodict, status)
 
     def _progress_hook(self, d):
-        # Ensure output directory exists for yt-dlp to write to
-        os.makedirs(self.options.output_dir, exist_ok=True)
-
         if d['status'] == 'downloading':
+            current_time = time.time()
+            if (current_time - self._last_progress_update_time) < self._progress_update_interval:
+                return # Throttle updates
+            self._last_progress_update_time = current_time
+
             total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
             downloaded_bytes = d.get('downloaded_bytes')
             progress = (downloaded_bytes / total_bytes) * 100 if total_bytes and downloaded_bytes is not None else 0.0
@@ -135,7 +138,7 @@ class YTDLPDownloader:
                 details=str(d.get('error'))
             ))
     
-    def register_status_callback(self, cb: Callable[[Optional[Dict[str, Any]], DownloadCurrentStatus]]):
+    def register_status_callback(self, cb: Callable[[Optional[Dict[str, Any]], DownloadCurrentStatus], Any]):
         self.status_callbacks.add(cb)
 
     def _download_target(self):
@@ -170,7 +173,9 @@ class YTDLPDownloader:
             logger.exception(f"Unhandled exception during download: {e}")
 
 
-    def start_download(self) -> Optional[Dict[str, Any]]:
+    def start_download(self):
+        os.makedirs(self.options.output_dir, exist_ok=True)
+
         with self._status_lock:
             if self._download_thread and self._download_thread.is_alive():
                 logger.warning("Download already in progress.")
@@ -178,7 +183,7 @@ class YTDLPDownloader:
             self._current_status = StatusPending() # Reset current status
             self._download_queue.clear() # Clear any old messages
             self._download_event.clear() # Clear old event
-            self._download_thread = threading.Thread(target=self._download_target, daemon=True)
+            self._download_thread = threading.Thread(target=self._download_target, daemon=False)
             self._download_thread.start()
             logger.info(f"Download started for {self.options.url}")
         
