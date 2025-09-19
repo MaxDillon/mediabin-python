@@ -82,11 +82,13 @@ DownloadCurrentStatus = StatusPending | StatusDownloading | StatusFinished | Sta
 class YTDLPDownloader:
     def __init__(self, options: DownloadOptions):
         self.options = options
+        self.infodict: Optional[Dict[str, Any]] = None
         self._current_status: DownloadCurrentStatus = StatusPending()
         self._status_lock = threading.Lock()
         self._download_event = threading.Event() # Event to signal download completion/error
         self._download_queue = [] # Queue for statuses to be consumed by generator
         self._download_thread: Optional[threading.Thread] = None
+        
 
     def _post_status(self, status: DownloadCurrentStatus):
         with self._status_lock:
@@ -127,11 +129,14 @@ class YTDLPDownloader:
                 details=str(d.get('error'))
             ))
 
-    def _download_target(self, info_callback: Optional[Callable[[Dict[str, Any]], None]] = None):
+    def _download_target(self):
         # Reset event for new download
         self._download_event.clear()
         self._download_queue.clear() # Clear queue for new download
         self._post_status(StatusPending())
+
+        def info_callback(infodict):
+            self.infodict = infodict
 
         try:
             ydl_opts = {
@@ -146,7 +151,7 @@ class YTDLPDownloader:
                 'postprocessors': [] # Empty postprocessors list
             }
 
-            with CustomDownloader(ydl_opts, info_callback=info_callback) as ydl: # Pass info_callback here
+            with CustomDownloader(ydl_opts, info_callback=info_callback) as ydl:
                 ydl.download([self.options.url])
         except Exception as e:
             self._post_status(StatusError(
@@ -157,14 +162,6 @@ class YTDLPDownloader:
 
 
     def start_download(self) -> Optional[Dict[str, Any]]:
-        # Event and storage for info_dict
-        info_dict_ready_event = threading.Event()
-        _info_dict_storage: Dict[str, Any] = {}
-
-        def _info_callback(info_dict: Dict[str, Any]):
-            _info_dict_storage.update(info_dict)
-            info_dict_ready_event.set()
-
         with self._status_lock:
             if self._download_thread and self._download_thread.is_alive():
                 logger.warning("Download already in progress.")
@@ -172,16 +169,10 @@ class YTDLPDownloader:
             self._current_status = StatusPending() # Reset current status
             self._download_queue.clear() # Clear any old messages
             self._download_event.clear() # Clear old event
-            self._download_thread = threading.Thread(target=self._download_target, args=(_info_callback,), daemon=True)
+            self._download_thread = threading.Thread(target=self._download_target, daemon=True)
             self._download_thread.start()
             logger.info(f"Download started for {self.options.url}")
         
-        if info_dict_ready_event.wait():
-            logger.info("Info dict processed and returned.")
-            return _info_dict_storage
-        else:
-            logger.warning("Unexpected event exit before complete.")
-            return None
 
     def get_current_status(self) -> DownloadCurrentStatus:
         with self._status_lock:
