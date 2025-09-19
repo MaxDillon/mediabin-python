@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from mediabin.daemon import Daemon
 import os
 import duckdb
@@ -102,7 +103,7 @@ class MediabinDaemon(Daemon):
             print(f"Failed to get url {url}")
             return
 
-        if info.hash_hex is None:
+        if info.mb_identifier is None:
             print(f"Failed to get url {url}")
             return
 
@@ -115,9 +116,10 @@ class MediabinDaemon(Daemon):
                     video_url,
                     thumbnail_url,
                     timestamp_created,
+                    object_path,
                     status
-                ) VALUES (?, ?, ?, ?, ?, ?, 'pending')""", 
-                (info.hash_hex, info.title, info.webpage_url, info.video_url, info.thumbnail, info.timestamp)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""", 
+                (info.mb_identifier, info.title, info.webpage_url, info.video_url, info.thumbnail, info.timestamp, info.mb_path)
             )
         except duckdb.ConstraintException:
             print(f"{url} is already downloaded or is currently in the queue")
@@ -157,22 +159,24 @@ class MediabinDaemon(Daemon):
     def _status_callback(self, info: Optional[VideoInfo], status: DownloadCurrentStatus):
         if not info:
             return
+        id = info.mb_identifier
 
         with self._lock_current_statuses, self._lock_current_downloads:
             print(f"Got status {status} for {id}")
             match status:
                 case StatusPending():
-                    self.current_statuses[info.hash_hex] = status
+                    self.current_statuses[id] = status
                 case StatusDownloading():
-                    self.current_statuses[info.hash_hex] = status
+                    self.current_statuses[id] = status
                 case StatusError():
-                    self.db.execute("UPDATE media.media SET status = 'error' WHERE id = ?", (info.hash_hex,))
-                    del self.current_downloads[info.hash_hex]
-                    del self.current_statuses[info.hash_hex]
+                    self.db.execute("UPDATE media.media SET status = 'error' WHERE id = ?", (id,))
+                    del self.current_downloads[id]
+                    del self.current_statuses[id]
                 case StatusFinished():
-                    self.db.execute("UPDATE media.media SET status = 'complete' WHERE id = ?", (info.hash_hex,))
-                    del self.current_downloads[info.hash_hex]
-                    del self.current_statuses[info.hash_hex]
+                    now = datetime.now()
+                    self.db.execute("UPDATE media.media SET status = 'complete', timestamp_installed = ?, timestamp_updated = ? WHERE id = ?", (now, now, id))
+                    del self.current_downloads[id]
+                    del self.current_statuses[id]
 
     def on_stop(self):
         with self._lock_current_downloads:

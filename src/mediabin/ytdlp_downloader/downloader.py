@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Dataclass to represent relevant video information
 @dataclass
 class VideoInfo:
+    mb_identifier: str
+    mb_path: str
+
     id: str
     title: str
     uploader: Optional[str] = None
@@ -33,35 +36,35 @@ class VideoInfo:
     channel: Optional[str] = None
     channel_id: Optional[str] = None
     upload_date: Optional[str] = None # YYYYMMDD format
-    # Custom fields added by enrich_infodict
-    hash_b32: Optional[str] = None
-    hash_hex: Optional[str] = None
 
 
 def enrich_infodict(info_dict):
     video_id = info_dict['id']
     extractor = info_dict['extractor']
-    unique_id_str = f"{extractor}-{video_id}"
-    md5_hash_digest = hashlib.md5(unique_id_str.encode('utf-8')).digest()
-    md5_b32 = base64.b32encode(md5_hash_digest).decode('utf-8').rstrip('=').upper()
-    md5_hex = md5_hash_digest.hex()
+    unique_id_str = f"{extractor}__{video_id}".encode('utf-8')
+    md5_hash_digest = hashlib.md5(unique_id_str).hexdigest()
 
-    info_dict['b1_b32'] = md5_b32[:2]
-    info_dict['b2_b32'] = md5_b32[2:4]
+    base_1 = md5_hash_digest[:4]
+    base_2 = md5_hash_digest[4:8]
 
-    info_dict['b1_hex'] = md5_hex[:2]
-    info_dict['b2_hex'] = md5_hex[2:4]
-
-    info_dict['hash_b32'] = md5_b32 # Store the full base32 hash
-    info_dict['hash_hex'] = md5_hex # Store the full base32 hash
+    info_dict['mb_path'] = f"{base_1}/{base_2}/{md5_hash_digest}"
+    info_dict['mb_identifier'] = md5_hash_digest # Store the full base32 hash
+    info_dict['_mb_path_components'] = {
+        'b1': base_1,
+        'b2': base_2,
+        'full': md5_hash_digest
+    }
     return info_dict
 
 
 def create_video_info_from_dict(info_dict: Dict[str, Any]) -> VideoInfo:
-    if 'hash_b32' not in info_dict:
+    if 'mb_identifier' not in info_dict:
         info_dict = enrich_infodict(info_dict)
 
     return VideoInfo(
+        mb_identifier=info_dict.get('mb_identifier'),
+        mb_path=info_dict.get('mb_path'),
+
         id=info_dict.get('id'),
         title=info_dict.get('title'),
         uploader=info_dict.get('uploader'),
@@ -76,8 +79,6 @@ def create_video_info_from_dict(info_dict: Dict[str, Any]) -> VideoInfo:
         channel=info_dict.get('channel'),
         channel_id=info_dict.get('channel_id'),
         upload_date=info_dict.get('upload_date'),
-        hash_b32=info_dict.get('hash_b32'),
-        hash_hex=info_dict.get('hash_hex'),
     )
 
 
@@ -204,7 +205,7 @@ class YTDLPDownloader:
 
         try:
             ydl_opts = {
-                'outtmpl': os.path.join(self.options.output_dir, '%(b1_b32)s/%(b2_b32)s/%(hash_b32)s/video.%(ext)s'),
+                'outtmpl': os.path.join(self.options.output_dir, '%(_mb_path_components.b1)s/%(_mb_path_components.b2)s/%(_mb_path_components.full)s/video.%(ext)s'),
                 'format': 'best',
                 'progress_hooks': [self._progress_hook],
                 'noplaylist': True,  # Ensure only single video is downloaded
