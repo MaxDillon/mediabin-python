@@ -38,6 +38,11 @@ class MediabinDaemon(Daemon):
         self.datadir = self._get_or_set_datadir()
 
         self.new_in_queue = threading.Event()
+        self.exit_event = threading.Event()
+
+        self.max_concurrent_downloads = 3
+        self.current_downloads = set()
+        self._lock_current_downloads = threading.Lock()
 
     def _init_db(self):
         conn = duckdb.connect(self.ledgerpath)
@@ -118,3 +123,13 @@ class MediabinDaemon(Daemon):
         for title, status in complete:
             print(f"    - {title}")
         
+    
+    def _worker_thread(self):
+        while not self.exit_event.is_set():
+            # trigger when event arrives or DB_POLL_INTERVAL elapses
+            if self.new_in_queue.wait(timeout=_DB_POLL_INTERVAL):
+                self.new_in_queue.clear()
+            
+            with self._lock_current_downloads:
+                pass
+                
