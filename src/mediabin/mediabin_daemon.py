@@ -29,10 +29,20 @@ _DB_POLL_INTERVAL = 1.0  # seconds
 
 class MediabinDaemon(Daemon):
     def on_spawn(self, ledgerpath: Optional[str] = None):
-        # --- existing initialization (kept as you provided) ---
-        self.ledgerpath = ledgerpath
-        if self.ledgerpath is None:
-            self.ledgerpath = os.path.join(MEDIABIN_DIRECTORY, "ledger.db")
+        os.makedirs(MEDIABIN_DIRECTORY, exist_ok=True)
+        LAST_LEDGERPATH_FILE = os.path.join(MEDIABIN_DIRECTORY, "last_ledgerpath")
+
+        if ledgerpath is None:
+            if os.path.exists(LAST_LEDGERPATH_FILE):
+                with open(LAST_LEDGERPATH_FILE, "r") as f:
+                    self.ledgerpath = f.read().strip()
+            else:
+                self.ledgerpath = os.path.join(MEDIABIN_DIRECTORY, "ledger.db")
+        else:
+            self.ledgerpath = ledgerpath
+        
+        with open(LAST_LEDGERPATH_FILE, "w") as f:
+            f.write(self.ledgerpath)
 
         self.db = self._init_db()
         self.datadir = self._get_or_set_datadir()
@@ -73,7 +83,7 @@ class MediabinDaemon(Daemon):
         if datadir_result and datadir_result[0] is not None:
             datadir: str = datadir_result[0]
         else:
-            datadir = os.path.join(MEDIABIN_DIRECTORY, "media_data")
+            datadir = os.path.join(os.path.dirname(self.ledgerpath), "media_data")
             self.db.execute(
                 "INSERT INTO metadata (datadir_location) VALUES (?)",
                 (datadir,),
