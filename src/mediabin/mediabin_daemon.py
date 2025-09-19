@@ -114,23 +114,34 @@ class MediabinDaemon(Daemon):
         self.new_in_queue.set()
 
     def list_media(self):
-        pending = self.db.sql("SELECT title, status FROM media.media WHERE status = 'pending'").fetchall()
+        downloading_ids = [id for id, status in self.current_statuses.items() if isinstance(status, StatusDownloading)]
+        pending_ids =  [id for id, status in self.current_statuses.items() if isinstance(status, StatusPending)]
+
+        active_jobs = self.db.execute("SELECT id, title FROM media.media WHERE id IN ?", (downloading_ids,)).fetchall()
+        
+        if active_jobs:
+            print("Current jobs:")
+        for id, title in active_jobs:
+            status = self.current_statuses[id]
+            print(f"\t- ({status.progress:6.2f}%) {title}")
+
+        pending = self.db.execute("""
+            SELECT title, status FROM media.media WHERE status = 'pending'
+            UNION ALL
+            SELECT title, status FROM media.media WHERE id IN ?
+        """, (pending_ids,)).fetchall()
+
         if pending:
             print("Pending:")
         for title, status in pending:
-            print(f"    - {title}")
+            print(f"\t- {title}")
         
         complete = self.db.sql("SELECT title, status FROM media.media WHERE status = 'complete'").fetchall()
         if complete:
             print("Complete:")
         for title, status in complete:
-            print(f"    - {title}")
+            print(f"\t- {title}")
         
-        if len(self.current_statuses) > 0:
-            with self._lock_current_statuses:
-                for status in self.current_statuses.values():
-                    print(status)
-    
     def _status_callback(self, info: Optional[VideoInfo], status: DownloadCurrentStatus):
         if not info:
             return
