@@ -75,9 +75,11 @@ def list_current_proces():
 
 @app.command("ls")
 @daemon.command
-def list_media():
+@click.option("--query", "-q",type=str, default=None, help="Filter by title (case-insensitive, partial match)")
+@click.option("--tag", "-t", multiple=True, help="Filter by tags (can be specified multiple times)")
+def list_media(query: str | None, tag: list[str]) -> None:
     """Lists all downloaded media."""
-    titles = daemon.list_media()
+    titles = daemon.list_media(title_like=query, tags=list(tag))
     for title in titles:
         print(f"- {title}")
 

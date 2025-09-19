@@ -1,7 +1,7 @@
 # Storage Spec
 - Ledger file contains tables `metadata`, `media.media`, `media.tags`
 - Metadata contains info fullpath of datadir
-- Datadir has a 3 level deep directory structure defined from a b32 encoded hash of the media id
+- Datadir has a 3 level deep directory structure defined from a hex encoded hash of the media id
     - First two directories are from first 4 bytes e.g. `SX/C5/SXC5CK...`
     - Files stored are video, metadata, preview (optional), thumbnail (optional)
 - Id can be any string but is meant for disambiguation. 
@@ -42,3 +42,7 @@ CREATE TABLE metadata(
     datadir_location TEXT -- Path to folder holding all media directories
 );
 ```
+
+
+# TODO:
+- [ ] In metadata table, specify how many allowable concurrent downloads

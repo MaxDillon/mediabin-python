@@ -152,8 +152,30 @@ class MediabinDaemon(Daemon):
                 pending_jobs=[(res[0], StatusPending()) for res in pending]
             )
 
-    def list_media(self) -> list[str]:
-        complete = self.db.sql("SELECT title FROM media.media WHERE status = 'complete'").fetchall()
+    def list_media(self, title_like: str | None = None, tags: list[str] = []) -> list[str]:
+        query = "SELECT m.title FROM media.media m"
+        where_clauses = ["m.status = 'complete'"]
+        join_clauses = []
+        query_args = []
+
+        if tags:
+            join_clauses.append("JOIN media.tags t ON m.id = t.resource_id")
+            where_clauses.append(f"t.tag IN ({', '.join(['?'] * len(tags))})")
+            query_args.extend(tags)
+
+        if title_like:
+            search_words = title_like.split()
+            if search_words:
+                title_pattern = '%'.join(search_words)
+                where_clauses.append("m.title ILIKE ?")
+                query_args.append(f"%{title_pattern}%")
+
+        if join_clauses:
+            query += " " + " ".join(join_clauses)
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        complete = self.db.execute(query, tuple(query_args)).fetchall()
         return [row[0] for row in complete]
         
     def _status_callback(self, info: Optional[VideoInfo], status: DownloadCurrentStatus):
