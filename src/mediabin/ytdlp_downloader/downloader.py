@@ -88,6 +88,8 @@ class YTDLPDownloader:
         self._download_event = threading.Event() # Event to signal download completion/error
         self._download_queue = [] # Queue for statuses to be consumed by generator
         self._download_thread: Optional[threading.Thread] = None
+
+        self.status_callbacks = set()
         
 
     def _post_status(self, status: DownloadCurrentStatus):
@@ -98,6 +100,10 @@ class YTDLPDownloader:
         # Signal completion/error
         if isinstance(status, (StatusFinished, StatusError)):
             self._download_event.set()
+        
+        # Call all registered callbacks
+        for cb in self.status_callbacks:
+            cb(self.infodict, status)
 
     def _progress_hook(self, d):
         # Ensure output directory exists for yt-dlp to write to
@@ -128,6 +134,9 @@ class YTDLPDownloader:
                 message=f"Download failed for {d.get('filename', self.options.url)}",
                 details=str(d.get('error'))
             ))
+    
+    def register_status_callback(self, cb: Callable[[Optional[Dict[str, Any]], DownloadCurrentStatus]]):
+        self.status_callbacks.add(cb)
 
     def _download_target(self):
         # Reset event for new download
