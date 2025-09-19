@@ -1,9 +1,9 @@
-from typing import Optional, Any
+from typing import Optional
 import click
 
 from mediabin import coloring
 from mediabin.mediabin_daemon import MediabinDaemon
-
+from mediabin.daemon import DaemonConnectionError
 
 daemon = MediabinDaemon() # Instantiate MediabinDaemon
 
@@ -81,5 +81,13 @@ def list_media():
     for title in titles:
         print(f"- {title}")
 
+
+def main():
+    try:
+        app()
+    except DaemonConnectionError:
+        print("Cannot connect to Daemon")
+        exit(1)
+
 if __name__ == "__main__":
-    app()
+    main()
