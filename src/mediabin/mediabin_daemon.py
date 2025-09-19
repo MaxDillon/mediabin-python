@@ -106,6 +106,15 @@ class MediabinDaemon(Daemon):
         self.new_in_queue.set()
 
     def list_media(self):
-        data = self.db.sql("SELECT title, status FROM media.media").fetchall()
-        for title, status in data:
-            print(title, status)
+        pending = self.db.sql("SELECT title, status FROM media.media WHERE status = 'pending'").fetchall()
+        if pending:
+            print("Pending:")
+        for title, status in pending:
+            print(f"    - {title}")
+        
+        complete = self.db.sql("SELECT title, status FROM media.media WHERE status = 'complete'").fetchall()
+        if complete:
+            print("Complete:")
+        for title, status in complete:
+            print(f"    - {title}")
+        
