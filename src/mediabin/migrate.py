@@ -75,7 +75,14 @@ def migrate_down_to(conn, migrations, current_version, target_version):
         apply_migration(conn, v, migrations[v]["down"], "down")
 
 def migrate_to_version(db_path, target_version):
-    conn = duckdb.connect(str(db_path))
+    """Migrate the database at db_path to target_version.
+
+    db_path can be either a Path object or a duckdb.DuckDBPyConnection object.
+    """
+    if isinstance(db_path, Path) or isinstance(db_path, str):
+        conn = duckdb.connect(str(db_path))
+    else:
+        conn = db_path
     ensure_schema_table(conn)
 
     current_version = get_current_version(conn)
@@ -92,6 +99,10 @@ def migrate_to_version(db_path, target_version):
 
     print(f"✅ Database migrated to version {target_version}")
 
+    # If we created the connection, we should close it
+    if isinstance(db_path, Path) or isinstance(db_path, str):
+        conn.close()
+
 def get_hightest_version():
     migrations = get_migration_files()
     highest_version = max(migrations.keys()) if migrations else 0
@@ -100,11 +111,12 @@ def get_hightest_version():
 
 def main():
     parser = argparse.ArgumentParser(description="DuckDB schema migration tool")
-    parser.add_argument("db", type=Path, help="Path to DuckDB database file")
+    parser.add_argument("db", type=str, help="Path to DuckDB database file, or in-memory ':memory:'")
     parser.add_argument("version", type=str, help="Target schema version (e.g., '3' or 'head')")
     args = parser.parse_args()
 
-    conn = duckdb.connect(str(args.db))
+    # The CLI always works with a path or ':memory:' string, so we can always connect
+    conn = duckdb.connect(args.db)
     ensure_schema_table(conn)
     highest_version = get_hightest_version()
 
@@ -124,9 +136,9 @@ def main():
             print(f"❌ Target version {target_version} is higher than the highest available migration {highest_version}.", file=sys.stderr)
             sys.exit(1)
     
-    if not args.db.exists():
+    if not Path(args.db).exists() and args.db != ":memory:":
         print(f"Creating new database at {args.db}")
-    migrate_to_version(args.db, target_version)
+    migrate_to_version(conn, target_version)
 
 if __name__ == "__main__":
     main()

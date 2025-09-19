@@ -11,11 +11,13 @@ CREATE TABLE media.media (
   video_url     TEXT,
   thumbnail_url TEXT,
 
-  timestamp_created   INTEGER,              -- Date of publication
-  timestamp_installed INTEGER NOT NULL,     -- Date first added to library
-  timestamp_updated   INTEGER NOT NULL,     -- Date last change was made
+  timestamp_created   TIMESTAMP,              -- Date of publication
+  timestamp_installed TIMESTAMP,     -- Date first added to library
+  timestamp_updated   TIMESTAMP,     -- Date last change was made
 
-  object_path TEXT NOT NULL -- ex. SX/C5/SXC5CK...
+  status TEXT NOT NULL,
+
+  object_path TEXT -- ex. SX/C5/SXC5CK...
 );
 
 CREATE TABLE media.tags (
@@ -26,5 +28,5 @@ CREATE TABLE media.tags (
 );
 
 CREATE TABLE metadata (
-  datadir_location TEXT -- Path to folder holding all media directories
+  datadir_location TEXT PRIMARY KEY -- Path to folder holding all media directories
 );

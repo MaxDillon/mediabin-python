@@ -1,40 +1,106 @@
 from mediabin.daemon import Daemon
-import time
-from typing import Dict, Optional
-import typer
-import threading
-import queue
 import os
 import duckdb
-from mediabin.migrate import migrate_to_version, ensure_schema_table, get_hightest_version, get_current_version
+from mediabin.migrate import ensure_schema_table
+import threading
+import os
+import duckdb
+from typing import Set, Optional
+from datetime import datetime
 
-from mediabin.ytdlp_downloader import YTDLPDownloader, DownloadOptions, StatusDownloading, StatusFinished, StatusError, StatusPending
+from mediabin.ytdlp_downloader import (
+    YTDLPDownloader,
+    StatusFinished,
+    StatusError,
+)
+from mediabin.ytdlp_downloader.downloader import DownloadOptions
+
 
 HOME_DIRECTORY = os.path.expanduser("~")
 MEDIABIN_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin")
+# mediabin/daemon_mediabin.py
+# Replace or add to your existing MediabinDaemon definition.
+# Assumes the rest of your imports and project layout are intact.
+
+
+# keep constants local to file for easy tuning
+_DB_POLL_INTERVAL = 1.0  # seconds
+
 
 class MediabinDaemon(Daemon):
-    """
-    Daemon process for handling mediabin daemon requests
-    """
-    def on_spawn(
-        self,
-        ledgerpath: Optional[str] = None
-    ):
-        """
-        Initializes daemon-specific resources.
-
-        Args:
-            ledgerpath: An optional path to the ledger file. If not provided, a default path will be used.
-        """
-
+    def on_spawn(self, ledgerpath: Optional[str] = None):
+        # --- existing initialization (kept as you provided) ---
         self.ledgerpath = ledgerpath
-        if self.ledgerpath == None:
+        if self.ledgerpath is None:
             self.ledgerpath = os.path.join(MEDIABIN_DIRECTORY, "ledger.db")
 
-        # Handle schema migrations automatically
-        self.db = duckdb.connect(self.ledgerpath)
+        self.db = self._init_db()
+        self.datadir = self._get_or_set_datadir()
+
+        self.new_in_queue = threading.Event()
+
+    def _init_db(self):
+        conn = duckdb.connect(self.ledgerpath)
         ensure_schema_table(self.db)
-        version = get_hightest_version()
-        if get_current_version(self.db) != version:
-            migrate_to_version(self.db, version)
+        # Ensure schema is up to date
+        from mediabin.migrate import migrate_to_version, get_hightest_version
+
+        highest_version = get_hightest_version()
+        version = highest_version
+
+        migrate_to_version(conn, version)
+        return conn
+
+    def _get_or_set_datadir(self) -> str:
+        datadir_result = self.db.sql("SELECT datadir_location FROM metadata").fetchone()
+        if datadir_result and datadir_result[0] is not None:
+            datadir: str = datadir_result[0]
+        else:
+            datadir = os.path.join(MEDIABIN_DIRECTORY, "media_data")
+            self.db.execute(
+                "INSERT INTO metadata (datadir_location) VALUES (?)",
+                (datadir,),
+            )
+            self.db.commit()
+
+        os.makedirs(datadir, exist_ok=True)
+        return datadir
+
+
+    def register_new_download(self, url):
+        downloader = YTDLPDownloader(DownloadOptions(url, self.datadir))
+
+        # starts downloader process, returns info of started process
+        info = downloader.start_download()
+        if info is None:
+            print(f"Failed to get url {url}")
+            return
+
+        id = info.get("hash_hex")
+        if id is None:
+            print(f"Failed to get url {url}")
+            return
+
+        title = info.get("title")
+        origin_url = info.get("original_url", url)
+        video_url = info.get("url")
+        thumbnail_url = info.get("thumbnail")
+        timestamp_created = datetime.fromtimestamp(int(info.get("timestamp")))
+        
+        try:
+            self.db.execute(
+                """INSERT INTO media.media (
+                    id,
+                    title,
+                    origin_url,
+                    video_url,
+                    thumbnail_url,
+                    timestamp_created,
+                    status
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending')""", 
+                (id, title, origin_url, video_url, thumbnail_url, timestamp_created)
+            )
+        except duckdb.ConstraintException:
+            print(f"{url} is already in queue")
+
+        self.new_in_queue.set()
