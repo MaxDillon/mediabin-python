@@ -13,6 +13,10 @@ import inspect
 import io
 import time
 
+class DaemonConnectionError(Exception):
+    """Custom exception for daemon connection issues."""
+    pass
+
 HOME_DIRECTORY = os.path.expanduser("~")
 DAEMON_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin", "daemon")
 os.makedirs(DAEMON_DIRECTORY, exist_ok=True)
@@ -74,28 +78,34 @@ def send_pickle(sock: socket.socket, obj):
     """Send an arbitrary Python object over a socket."""
     data = pickle.dumps(obj)
     length = struct.pack(">Q", len(data))  # 8-byte big-endian length
-    sock.sendall(length)
-    sock.sendall(data)
+    try:
+        sock.sendall(length)
+        sock.sendall(data)
+    except socket.error as e:
+        raise DaemonConnectionError(f"Failed to send data over socket: {e}") from e
 
 
 def recv_pickle(sock: socket.socket):
     """Receive an arbitrary Python object over a socket."""
     # Read 8-byte length prefix
     length_buf = b""
-    while len(length_buf) < 8:
-        chunk = sock.recv(8 - len(length_buf))
-        if not chunk:
-            raise ConnectionError("Socket closed while reading length")
-        length_buf += chunk
-    length = struct.unpack(">Q", length_buf)[0]
+    try:
+        while len(length_buf) < 8:
+            chunk = sock.recv(8 - len(length_buf))
+            if not chunk:
+                raise DaemonConnectionError("Socket closed while reading length")
+            length_buf += chunk
+        length = struct.unpack(">Q", length_buf)[0]
 
-    # Read the actual pickled data
-    data = b""
-    while len(data) < length:
-        chunk = sock.recv(min(4096, length - len(data)))
-        if not chunk:
-            raise ConnectionError("Socket closed while reading data")
-        data += chunk
+        # Read the actual pickled data
+        data = b""
+        while len(data) < length:
+            chunk = sock.recv(min(4096, length - len(data)))
+            if not chunk:
+                raise DaemonConnectionError("Socket closed while reading data")
+            data += chunk
+    except socket.error as e:
+        raise DaemonConnectionError(f"Failed to receive data over socket: {e}") from e
 
     return pickle.loads(data)
 
@@ -203,7 +213,10 @@ class Daemon:
         def wrapper(*args, **kwargs):
             message = Message(name=name, args=list(args), kwargs=kwargs)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-                s.connect(SOCKET_FILE)
+                try:
+                    s.connect(SOCKET_FILE)
+                except (ConnectionRefusedError, FileNotFoundError, DaemonConnectionError) as e:
+                    raise DaemonConnectionError(f"Daemon not running or socket unavailable") from e
 
                 send_pickle(s, message)
 
@@ -254,15 +267,6 @@ class Daemon:
             if os.path.exists(PID_FILE):
                 os.remove(PID_FILE)
             print("Daemon stopped cleanly.")
- 
-    @classmethod
-    def send_message(cls, message: Message) -> Any:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.connect(SOCKET_FILE)
-            send_pickle(s, message)       # send message
-            response = recv_pickle(s)     # wait for server response
-            return response
-
 
     def handle_client(self, conn, addr):
         with conn:
@@ -270,7 +274,7 @@ class Daemon:
             while True:
                 try:
                     message: Message = recv_pickle(conn)
-                except ConnectionError:
+                except DaemonConnectionError:
                     print(f"Client disconnected: {addr}")
                     break
                 except Exception as e:

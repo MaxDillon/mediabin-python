@@ -1,3 +1,3 @@
-from mediabin.daemon.daemon import Daemon
+from mediabin.daemon.daemon import Daemon, DaemonConnectionError
 
-__all__ = ["Daemon"]
+__all__ = ["Daemon", "DaemonConnectionError"]
