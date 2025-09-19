@@ -41,7 +41,7 @@ class MediabinDaemon(Daemon):
         self.exit_event = threading.Event()
 
         self.max_concurrent_downloads = 3
-        self.current_downloads: Set[YTDLPDownloader] = set()
+        self.current_downloads: Dict[str, YTDLPDownloader] = {}
         self._lock_current_downloads = threading.Lock()
 
         self.current_statuses: Dict[str, StatusDownloading | StatusPending] = {}
@@ -128,6 +128,27 @@ class MediabinDaemon(Daemon):
                 for status in self.current_statuses.values():
                     print(status)
     
+    def _status_callback(self, info: Optional[VideoInfo], status: DownloadCurrentStatus):
+        if not info:
+            return
+
+        with self._lock_current_statuses, self._lock_current_downloads:
+            print(f"Got status {status} for {id}")
+            match status:
+                case StatusPending():
+                    self.current_statuses[info.hash_hex] = status
+                case StatusDownloading():
+                    self.current_statuses[info.hash_hex] = status
+                case StatusError():
+                    self.db.execute("UPDATE media.media SET status = 'error' WHERE id = ?", (info.hash_hex,))
+                    del self.current_downloads[info.hash_hex]
+                    del self.current_statuses[info.hash_hex]
+                case StatusFinished():
+                    self.db.execute("UPDATE media.media SET status = 'complete' WHERE id = ?", (info.hash_hex,))
+                    del self.current_downloads[info.hash_hex]
+                    del self.current_statuses[info.hash_hex]
+
+
     def _worker_thread_proc(self):
         while not self.exit_event.is_set():
             # trigger when event arrives or DB_POLL_INTERVAL elapses
@@ -135,44 +156,20 @@ class MediabinDaemon(Daemon):
                 self.new_in_queue.clear()
             
             with self._lock_current_downloads:
-                for job in self.current_downloads:
-                    status = job.get_current_status()
-                    info = job.info()
+                if len(self.current_downloads) >= self.max_concurrent_downloads:
+                    continue
 
-                    match status:
-                        case StatusPending():
-                            self.current_statuses[info.hash_hex] = status
-                        case StatusDownloading():
-                            self.current_statuses[info.hash_hex] = status
-                        case StatusError():
-                            self.db.execute("UPDATE media.media SET status = 'error' WHERE id = ?", (info.hash_hex,))
-                            self.current_downloads.remove(job)
-                        case StatusFinished():
-                            self.db.execute("UPDATE media.media SET status = 'complete' WHERE id = ?", (info.hash_hex,))
-                            self.current_downloads.remove(job)
+                next_vals = self.db.sql("SELECT id, origin_url FROM media.media WHERE status = 'pending'").fetchone()
+                if next_vals is None:
+                    continue
+                
+                id, url = next_vals
+                self.db.execute("UPDATE media.media SET status = 'downloading' WHERE id = ?", (id,))
 
-                if len(self.current_downloads) < self.max_concurrent_downloads:
-                    next_vals = self.db.sql("SELECT id, origin_url FROM media.media WHERE status = 'pending'").fetchone()
-                    if next_vals is None:
-                        return
-                    
-                    id, url = next_vals
-                    self.db.execute("UPDATE media.media SET status = 'downloading' WHERE id = ?", (id,))
-                    new_job = YTDLPDownloader(DownloadOptions(url, self.datadir))
+                new_job = YTDLPDownloader(DownloadOptions(url, self.datadir))
+                new_job.register_status_callback(self._status_callback)
 
-                    def status_callback(info: VideoInfo, status: DownloadCurrentStatus):
-                        with self._lock_current_statuses:
-                            match status:
-                                case StatusPending():
-                                    self.current_statuses[info.hash_hex] = status
-                                case StatusDownloading():
-                                    self.current_statuses[info.hash_hex] = status
-                                case StatusError():
-                                    del self.current_statuses[info.hash_hex]
-                                case StatusFinished():
-                                    del self.current_statuses[info.hash_hex]
-                    
-                    new_job.register_status_callback(status_callback)
-
-                    self.current_downloads.add(new_job)
-                    new_job.start_download()
+                self.current_downloads[id] = new_job
+                self.current_statuses[id] = StatusPending()
+                print(f"Starting job {id}")
+                new_job.start_download()
