@@ -44,8 +44,8 @@ def enrich_infodict(info_dict):
     unique_id_str = f"{extractor}__{video_id}".encode('utf-8')
     md5_hash_digest = hashlib.md5(unique_id_str).hexdigest()
 
-    base_1 = md5_hash_digest[:4]
-    base_2 = md5_hash_digest[4:8]
+    base_1 = md5_hash_digest[:2]
+    base_2 = md5_hash_digest[2:4]
 
     info_dict['mb_path'] = f"{base_1}/{base_2}/{md5_hash_digest}"
     info_dict['mb_identifier'] = md5_hash_digest # Store the full base32 hash
