@@ -59,5 +59,11 @@ def install_media(url):
     daemon.register_new_download(url=url)
     print(f"Added {url} to download queue. Check status with 'mb list'.")
 
+
+@app.command("ls")
+@daemon.command
+def list_media():
+    daemon.list_media()
+
 if __name__ == "__main__":
     app()

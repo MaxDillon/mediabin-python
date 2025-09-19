@@ -101,6 +101,11 @@ class MediabinDaemon(Daemon):
                 (id, title, origin_url, video_url, thumbnail_url, timestamp_created)
             )
         except duckdb.ConstraintException:
-            print(f"{url} is already in queue")
+            print(f"{url} is already downloaded or is currently in the queue")
 
         self.new_in_queue.set()
+
+    def list_media(self):
+        data = self.db.sql("SELECT title, status FROM media.media").fetchall()
+        for title, status in data:
+            print(title, status)
