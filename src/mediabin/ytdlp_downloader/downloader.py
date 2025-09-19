@@ -1,4 +1,4 @@
-import sys
+from datetime import datetime
 import os
 import threading
 import logging
@@ -21,7 +21,7 @@ class VideoInfo:
     id: str
     title: str
     uploader: Optional[str] = None
-    timestamp: Optional[int] = None
+    timestamp: Optional[datetime] = None
     description: Optional[str] = None
     thumbnail: Optional[str] = None
     duration: Optional[int] = None
@@ -64,7 +64,7 @@ def create_video_info_from_dict(info_dict: Dict[str, Any]) -> VideoInfo:
         id=info_dict.get('id'),
         title=info_dict.get('title'),
         uploader=info_dict.get('uploader'),
-        timestamp=info_dict.get('timestamp'),
+        timestamp=datetime.fromtimestamp(info_dict.get('timestamp')),
         description=info_dict.get('description'),
         thumbnail=info_dict.get('thumbnail'),
         duration=info_dict.get('duration'),

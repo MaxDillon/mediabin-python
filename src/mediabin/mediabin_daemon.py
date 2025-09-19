@@ -5,7 +5,7 @@ from mediabin.migrate import ensure_schema_table
 import threading
 import os
 import duckdb
-from typing import Set, Optional
+from typing import Set, Optional, Dict
 from datetime import datetime
 
 from mediabin.ytdlp_downloader import (
@@ -13,7 +13,7 @@ from mediabin.ytdlp_downloader import (
     StatusFinished,
     StatusError,
 )
-from mediabin.ytdlp_downloader.downloader import DownloadOptions
+from mediabin.ytdlp_downloader.downloader import DownloadCurrentStatus, DownloadOptions, StatusDownloading, StatusPending, VideoInfo
 
 
 HOME_DIRECTORY = os.path.expanduser("~")
@@ -43,6 +43,14 @@ class MediabinDaemon(Daemon):
         self.max_concurrent_downloads = 3
         self.current_downloads: Set[YTDLPDownloader] = set()
         self._lock_current_downloads = threading.Lock()
+
+        self.current_statuses: Dict[str, StatusDownloading | StatusPending] = {}
+        self._lock_current_statuses = threading.Lock()
+
+        self._worker_thread = threading.Thread(target=self._worker_thread_proc, daemon=False)
+        self._worker_thread.start()
+
+
 
     def _init_db(self):
         conn = duckdb.connect(self.ledgerpath)
@@ -115,8 +123,12 @@ class MediabinDaemon(Daemon):
         for title, status in complete:
             print(f"    - {title}")
         
+        if len(self.current_statuses) > 0:
+            with self._lock_current_statuses:
+                for status in self.current_statuses.values():
+                    print(status)
     
-    def _worker_thread(self):
+    def _worker_thread_proc(self):
         while not self.exit_event.is_set():
             # trigger when event arrives or DB_POLL_INTERVAL elapses
             if self.new_in_queue.wait(timeout=_DB_POLL_INTERVAL):
@@ -128,20 +140,39 @@ class MediabinDaemon(Daemon):
                     info = job.info()
 
                     match status:
+                        case StatusPending():
+                            self.current_statuses[info.hash_hex] = status
+                        case StatusDownloading():
+                            self.current_statuses[info.hash_hex] = status
                         case StatusError():
                             self.db.execute("UPDATE media.media SET status = 'error' WHERE id = ?", (info.hash_hex,))
                             self.current_downloads.remove(job)
                         case StatusFinished():
                             self.db.execute("UPDATE media.media SET status = 'complete' WHERE id = ?", (info.hash_hex,))
                             self.current_downloads.remove(job)
-                
+
                 if len(self.current_downloads) < self.max_concurrent_downloads:
-                    next_vals = self.db.sql("SELECT id, original_url FROM media.media WHERE status = 'pending'").fetchone()
+                    next_vals = self.db.sql("SELECT id, origin_url FROM media.media WHERE status = 'pending'").fetchone()
                     if next_vals is None:
                         return
                     
                     id, url = next_vals
                     self.db.execute("UPDATE media.media SET status = 'downloading' WHERE id = ?", (id,))
                     new_job = YTDLPDownloader(DownloadOptions(url, self.datadir))
+
+                    def status_callback(info: VideoInfo, status: DownloadCurrentStatus):
+                        with self._lock_current_statuses:
+                            match status:
+                                case StatusPending():
+                                    self.current_statuses[info.hash_hex] = status
+                                case StatusDownloading():
+                                    self.current_statuses[info.hash_hex] = status
+                                case StatusError():
+                                    del self.current_statuses[info.hash_hex]
+                                case StatusFinished():
+                                    del self.current_statuses[info.hash_hex]
+                    
+                    new_job.register_status_callback(status_callback)
+
                     self.current_downloads.add(new_job)
                     new_job.start_download()
