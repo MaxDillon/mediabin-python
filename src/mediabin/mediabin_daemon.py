@@ -36,6 +36,8 @@ class MediabinDaemon(Daemon):
         self.db = self._init_db()
         self.datadir = self._get_or_set_datadir()
 
+        self._restart_downloading_jobs()
+
         self.new_in_queue = threading.Event()
         self.exit_event = threading.Event()
 
@@ -50,6 +52,8 @@ class MediabinDaemon(Daemon):
         self._worker_thread.start()
 
 
+    def _restart_downloading_jobs(self):
+        self.db.execute("UPDATE media.media SET status = 'pending' WHERE status = 'downloading'")
 
     def _init_db(self):
         conn = duckdb.connect(self.ledgerpath)

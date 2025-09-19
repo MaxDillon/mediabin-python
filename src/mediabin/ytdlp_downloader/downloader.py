@@ -219,7 +219,6 @@ class YTDLPDownloader:
                 ydl.download([self.options.url])
         except DownloadCancelled:
             logger.info(f"Download of {self.options.url} was cancelled.")
-            self._post_status(StatusPending(message="Download cancelled"))
         except Exception as e:
             self._post_status(StatusError(
                 message=f"Unhandled exception during download of {self.options.url}",
