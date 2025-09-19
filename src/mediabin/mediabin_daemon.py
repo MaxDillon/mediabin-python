@@ -5,8 +5,7 @@ from mediabin.migrate import ensure_schema_table
 import threading
 import os
 import duckdb
-from typing import Set, Optional, Dict
-from datetime import datetime
+from typing import Optional, Dict
 
 from mediabin.ytdlp_downloader import (
     YTDLPDownloader,
@@ -148,6 +147,9 @@ class MediabinDaemon(Daemon):
                     del self.current_downloads[info.hash_hex]
                     del self.current_statuses[info.hash_hex]
 
+    def on_stop(self):
+        self.exit_event.set()
+        self._worker_thread.join()
 
     def _worker_thread_proc(self):
         while not self.exit_event.is_set():
