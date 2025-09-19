@@ -73,10 +73,9 @@ class MediabinDaemon(Daemon):
 
 
     def register_new_download(self, url):
-        downloader = YTDLPDownloader(DownloadOptions(url, self.datadir))
+        info = YTDLPDownloader.get_info(url)
 
         # starts downloader process, returns info of started process
-        info = downloader.start_download()
         if info is None:
             print(f"Failed to get url {url}")
             return

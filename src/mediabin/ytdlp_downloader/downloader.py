@@ -16,27 +16,31 @@ from tqdm import tqdm # Keep tqdm import for now, will be used in generator
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
+def enrich_infodict(info_dict):
+    video_id = info_dict['id']
+    extractor = info_dict['extractor']
+    unique_id_str = f"{extractor}-{video_id}"
+    md5_hash_digest = hashlib.md5(unique_id_str.encode('utf-8')).digest()
+    md5_b32 = base64.b32encode(md5_hash_digest).decode('utf-8').rstrip('=').upper()
+    md5_hex = md5_hash_digest.hex()
+
+    info_dict['b1_b32'] = md5_b32[:2]
+    info_dict['b2_b32'] = md5_b32[2:4]
+
+    info_dict['b1_hex'] = md5_hex[:2]
+    info_dict['b2_hex'] = md5_hex[2:4]
+
+    info_dict['hash_b32'] = md5_b32 # Store the full base32 hash
+    info_dict['hash_hex'] = md5_hex # Store the full base32 hash
+    return info_dict
+
 class CustomDownloader(YoutubeDL):
     def __init__(self, *args, info_callback: Optional[Callable[[Dict[str, Any]], None]] = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.info_callback = info_callback
 
     def process_info(self, info_dict):
-        video_id = info_dict['id']
-        extractor = info_dict['extractor']
-        unique_id_str = f"{extractor}-{video_id}"
-        md5_hash_digest = hashlib.md5(unique_id_str.encode('utf-8')).digest()
-        md5_b32 = base64.b32encode(md5_hash_digest).decode('utf-8').rstrip('=').upper()
-        md5_hex = md5_hash_digest.hex()
-
-        info_dict['b1_b32'] = md5_b32[:2]
-        info_dict['b2_b32'] = md5_b32[2:4]
-
-        info_dict['b1_hex'] = md5_hex[:2]
-        info_dict['b2_hex'] = md5_hex[2:4]
-
-        info_dict['hash_b32'] = md5_b32 # Store the full base32 hash
-        info_dict['hash_hex'] = md5_hex # Store the full base32 hash
+        info_dict = enrich_infodict(info_dict)
         if self.info_callback:
             self.info_callback(info_dict)
         return super().process_info(info_dict)
@@ -265,6 +269,38 @@ class YTDLPDownloader:
             if pbar: # Ensure pbar is closed on any exit
                 pbar.close()
 
+
+    @staticmethod
+    def get_info(url: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve video metadata (yt-dlp info_dict) for the given URL
+        without downloading the media file. This is a blocking call.
+
+        Args:
+            url (str): The video URL to extract info for.
+
+        Returns:
+            dict: The yt-dlp info_dict for the video.
+            None: If extraction failed.
+        """
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'skip_download': True,   # Do not download the video
+                'no_warnings': True,
+                'simulate': True,        # Only simulate, don’t download
+                'forcejson': True,       # Ensure json info is retrieved
+                'writesubtitles': False,
+                'writethumbnail': False,
+                'writeinfojson': False,  # Prevent writing info.json to disk
+                'noplaylist': True,      # Don’t extract playlists
+            }
+            with YoutubeDL(ydl_opts) as ydl:
+                info_dict = ydl.extract_info(url, download=False)
+                return enrich_infodict(info_dict)
+        except Exception as e:
+            logger.exception(f"Failed to retrieve info for {url}: {e}")
+            return None
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
