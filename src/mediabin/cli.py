@@ -59,6 +59,16 @@ def install_media(url):
     daemon.register_new_download(url=url)
     print(f"Added {url} to download queue. Check status with 'mb list'.")
 
+@app.command("ps")
+@daemon.command
+def list_current_proces():
+    procs = daemon.list_current_procs()
+    for title, status in procs.current_jobs:
+        print(f"({status.progress:6.2f}%) {title}")
+
+    for title, _ in procs.pending_jobs:
+        print(f"(pending) {title}")
+
 
 @app.command("ls")
 @daemon.command

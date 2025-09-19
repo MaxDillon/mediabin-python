@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from mediabin.daemon import Daemon
 import os
 import duckdb
@@ -5,7 +6,7 @@ from mediabin.migrate import ensure_schema_table
 import threading
 import os
 import duckdb
-from typing import Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 from mediabin.ytdlp_downloader import (
     YTDLPDownloader,
@@ -112,6 +113,32 @@ class MediabinDaemon(Daemon):
             print(f"{url} is already downloaded or is currently in the queue")
 
         self.new_in_queue.set()
+
+    @dataclass
+    class ListCurrentProcsResp:
+        current_jobs: List[Tuple[str, StatusDownloading]]
+        pending_jobs: List[Tuple[str, StatusPending]]
+
+    def list_current_procs(self):
+        with self._lock_current_statuses:
+            downloading_ids = [id for id, status in self.current_statuses.items() if isinstance(status, StatusDownloading)]
+            pending_ids =  [id for id, status in self.current_statuses.items() if isinstance(status, StatusPending)]
+
+            active_jobs = self.db.execute("SELECT id, title FROM media.media WHERE id IN ?", (downloading_ids,)).fetchall()
+
+            downloading = [(title, self.current_statuses[id]) for id, title in active_jobs]
+
+
+            pending = self.db.execute("""
+                SELECT title FROM media.media WHERE status = 'pending'
+                UNION ALL
+                SELECT title FROM media.media WHERE id IN ?
+            """, (pending_ids,)).fetchall()
+            
+            return MediabinDaemon.ListCurrentProcsResp(
+                current_jobs=downloading,
+                pending_jobs=[(res[0], StatusPending()) for res in pending]
+            )
 
     def list_media(self):
         downloading_ids = [id for id, status in self.current_statuses.items() if isinstance(status, StatusDownloading)]
