@@ -66,7 +66,7 @@ class MediabinDaemon(Daemon):
         self._worker_thread.start()
 
         app = create_app(ledgerpath=self.ledgerpath)
-        self._web_server = make_server("0.0.0.0", 8080, app)
+        self._web_server = make_server("localhost", 8080, app)
         self._web_thread = threading.Thread(target=self._web_server.serve_forever, daemon=False)
         self._web_thread.start()
 
