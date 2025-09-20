@@ -5,6 +5,7 @@ import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+import shutil
 
 # Migrations directory is project_root/migrations
 MIGRATIONS_DIR = (Path(__file__).parent / "versions").resolve()
@@ -31,6 +32,27 @@ def ensure_schema_table(conn: duckdb.DuckDBPyConnection):
             applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+def db_has_user_data(conn: duckdb.DuckDBPyConnection) -> bool:
+    """Return True if any non-_schema_migrations table contains rows."""
+    tables = conn.execute("""
+        SELECT table_schema, table_name
+        FROM information_schema.tables
+        WHERE table_type = 'BASE TABLE'
+          AND table_name != '_schema_migrations'
+          AND table_schema NOT IN ('information_schema')
+    """).fetchall()
+
+    for schema, table in tables:
+        full_name = f'"{schema}"."{table}"' if schema != 'main' else f'"{table}"'
+        try:
+            row = conn.execute(f"SELECT 1 FROM {full_name} LIMIT 1").fetchone()
+            if row is not None:
+                return True  # found at least one row somewhere
+        except Exception:
+            # If table is inaccessible for some reason, ignore it
+            continue
+    return False
 
 def get_current_version(conn: duckdb.DuckDBPyConnection):
     result = conn.execute("SELECT max(version) FROM _schema_migrations").fetchone()
@@ -74,19 +96,27 @@ def migrate_down_to(conn, migrations, current_version, target_version):
             sys.exit(1)
         apply_migration(conn, v, migrations[v]["down"], "down")
 
-def migrate_to_version(db_path, target_version):
+def migrate_to_version(db_path: str | Path, target_version):
     """Migrate the database at db_path to target_version.
 
     db_path can be either a Path object or a duckdb.DuckDBPyConnection object.
     """
-    if isinstance(db_path, Path) or isinstance(db_path, str):
-        conn = duckdb.connect(str(db_path))
-    else:
-        conn = db_path
+    db_file_path = Path(db_path)
+    conn = duckdb.connect(str(db_file_path))
     ensure_schema_table(conn)
 
     current_version = get_current_version(conn)
     print(f"Current schema version: {current_version}")
+    has_user_data = db_has_user_data(conn)
+
+    if current_version != 0 and db_file_path.name != ":memory:" and has_user_data:
+        backup_file_name = f"{db_file_path}.bak"
+        backup_path = db_file_path.parent / backup_file_name
+        try:
+            shutil.copy2(db_file_path, backup_path)
+            print(f"Created database backup at {backup_path}")
+        except Exception as e:
+            print(f"❌ Failed to create database backup: {e}", file=sys.stderr)
 
     migrations = get_migration_files()
 
@@ -98,10 +128,7 @@ def migrate_to_version(db_path, target_version):
         print("No migrations to apply.")
 
     print(f"✅ Database migrated to version {target_version}")
-
-    # If we created the connection, we should close it
-    if isinstance(db_path, Path) or isinstance(db_path, str):
-        conn.close()
+    conn.close()
 
 def get_hightest_version():
     migrations = get_migration_files()
@@ -138,7 +165,7 @@ def main():
     
     if not Path(args.db).exists() and args.db != ":memory:":
         print(f"Creating new database at {args.db}")
-    migrate_to_version(conn, target_version)
+    migrate_to_version(args.db, target_version)
 
 if __name__ == "__main__":
     main()
