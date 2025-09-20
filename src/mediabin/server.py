@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import os
-from flask import Flask, jsonify, send_file, abort, current_app, g
+from flask import Flask, jsonify, send_from_directory, abort, current_app, g
 import duckdb
 
 @dataclass
@@ -41,7 +41,9 @@ def create_app(ledgerpath: str, datadir: str):
         if not row:
             abort(404)
         
-        media_dir = os.path.join(app.config["datadir"], row[0])
-        return send_file(os.path.join(media_dir, "video.mp4"), conditional=True) 
+        filepath = os.path.join(row[0], "video.mp4")
+        response = send_from_directory(app.config["datadir"], filepath, mimetype="video/mp4", conditional=True) 
+        response.headers['Accept-Ranges'] = 'bytes'
+        return response
 
     return app
