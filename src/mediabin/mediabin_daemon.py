@@ -94,6 +94,9 @@ class MediabinDaemon(Daemon):
         os.makedirs(datadir, exist_ok=True)
         return datadir
 
+    def get_datadir_location(self) -> str | None:
+        result = self.db.sql("SELECT datadir_location FROM metadata").fetchone()
+        return result[0] if result else None
 
     def register_new_download(self, url):
         info = YTDLPDownloader.fetch_info(url)

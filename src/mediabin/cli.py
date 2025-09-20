@@ -1,9 +1,21 @@
 from typing import Optional
 import click
+import os
+import shutil
 
 from mediabin import coloring
 from mediabin.mediabin_daemon import MediabinDaemon
 from mediabin.daemon import DaemonConnectionError
+
+def format_bytes(size: int) -> str:
+    # 2**10 = 1024
+    power = 2**10
+    n = 0
+    power_labels = {0: '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
+    while size > power:
+        size /= power
+        n += 1
+    return f"{size:.2f} {power_labels[n]}B"
 
 daemon = MediabinDaemon() # Instantiate MediabinDaemon
 
@@ -44,6 +56,27 @@ def app(
         # Pass ledger_path to the spawn method
         pid = daemon.spawn(ledgerpath=ledger_path)
         print(f"Started with pid: {pid}")
+
+
+@app.command("du")
+@daemon.command
+def get_available_disk_space():
+    """Gets disk space used and available for new media"""
+    datadir = daemon.get_datadir_location()
+    if not datadir:
+        print(coloring.error("Datadir location not set. Please run 'mediabin init' first."))
+        return
+
+    if not os.path.exists(datadir):
+        print(coloring.error(f"Datadir location '{datadir}' does not exist."))
+        return
+
+    total, used, free = shutil.disk_usage(datadir)
+
+    print(f"Disk space for media directory: {datadir}")
+    print(f"  Total: {format_bytes(total)}")
+    print(f"  Used:  {format_bytes(used)}")
+    print(f"  Free:  {format_bytes(free)}")
 
 
 @app.command("i")
