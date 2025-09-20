@@ -5,7 +5,8 @@ import os
 import shutil
 
 from mediabin import coloring
-from mediabin.mediabin_daemon import MediabinDaemon, ServerStartOptions
+from mediabin.mediabin_daemon import MediabinDaemon
+from mediabin.server import ServerStartOptions
 from mediabin.daemon import DaemonConnectionError
 
 def format_bytes(size: int) -> str:

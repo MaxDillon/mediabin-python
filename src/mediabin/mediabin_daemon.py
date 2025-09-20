@@ -8,7 +8,9 @@ import threading
 import os
 import duckdb
 from typing import List, Optional, Dict, Tuple
+from werkzeug.serving import make_server
 
+from mediabin.server import ServerStartOptions, create_app
 from mediabin.ytdlp_downloader import (
     YTDLPDownloader,
     StatusFinished,
@@ -26,11 +28,6 @@ MEDIABIN_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin")
 
 # keep constants local to file for easy tuning
 _DB_POLL_INTERVAL = 1.0  # seconds
-
-@dataclass
-class ServerStartOptions:
-    tailscale: bool = False
-    port: int = 80
 
 
 class MediabinDaemon(Daemon):
@@ -68,6 +65,10 @@ class MediabinDaemon(Daemon):
         self._worker_thread = threading.Thread(target=self._worker_thread_proc, daemon=False)
         self._worker_thread.start()
 
+        app = create_app(ledgerpath=self.ledgerpath, datadir=self.datadir)
+        self._web_server = make_server("0.0.0.0", 8080, app)
+        self._web_thread = threading.Thread(target=self._web_server.serve_forever, daemon=False)
+        self._web_thread.start()
 
     def _restart_downloading_jobs(self):
         self.db.execute("UPDATE media.media SET status = 'pending' WHERE status = 'downloading'")
@@ -213,7 +214,10 @@ class MediabinDaemon(Daemon):
             for job in self.current_downloads.values():
                 job.cancel_download()
 
+        self._web_server.shutdown()
         self.exit_event.set()
+
+        self._web_thread.join()
         self._worker_thread.join()
 
     def _worker_thread_proc(self):
