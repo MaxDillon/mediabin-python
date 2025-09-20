@@ -27,6 +27,7 @@ SOCKET_FILE = os.path.join(DAEMON_DIRECTORY, "socket.sock")
 
 class TaggedStreamProxy(io.TextIOBase):
     connections = {}
+    map_isatty = {}
 
     def __init__(self, stream_cls, fallback_log_path):
         self.stream_cls = stream_cls
@@ -47,21 +48,29 @@ class TaggedStreamProxy(io.TextIOBase):
                     f.flush()
         return len(s)
 
+    def isatty(self) -> bool:
+        return self.map_isatty.get(threading.get_ident(), False)
+
     def flush(self):
         pass  # no-op, writes are already flushed
 
-    def tag_connection(self, conn):
+    def tag_connection(self, conn, isatty=False):
         with self.lock:
             self.connections[threading.get_ident()] = conn
+            self.map_isatty[threading.get_ident()] = isatty
 
     def remove_connection(self):
         with self.lock:
             self.connections.pop(threading.get_ident(), None)
+            self.map_isatty.pop(threading.get_ident(), None)
 
 
 @dataclass
 class Message:
     name: str
+    isatty_stdout: bool
+    isatty_stderr: bool
+
     args: list[Any]
     kwargs: dict[str, Any]
 
@@ -211,7 +220,13 @@ class Daemon:
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            message = Message(name=name, args=list(args), kwargs=kwargs)
+            message = Message(
+                name=name, 
+                isatty_stdout=sys.stdout.isatty(),
+                isatty_stderr=sys.stderr.isatty(),
+                args=list(args), 
+                kwargs=kwargs
+            )
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 try:
                     s.connect(SOCKET_FILE)
@@ -288,8 +303,8 @@ class Daemon:
                 if cmd_name in self._commands:
                     try:
                         # Tag the connection to the thread for StreamProxy
-                        self._stdout_proxy.tag_connection(conn)
-                        self._stderr_proxy.tag_connection(conn)
+                        self._stdout_proxy.tag_connection(conn, isatty=message.isatty_stdout)
+                        self._stderr_proxy.tag_connection(conn, isatty=message.isatty_stderr)
                         try:
                             result = self._commands[cmd_name](*args, **kwargs)
                         finally:
