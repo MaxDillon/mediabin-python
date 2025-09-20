@@ -65,7 +65,7 @@ class MediabinDaemon(Daemon):
         self._worker_thread = threading.Thread(target=self._worker_thread_proc, daemon=False)
         self._worker_thread.start()
 
-        app = create_app(ledgerpath=self.ledgerpath, datadir=self.datadir)
+        app = create_app(ledgerpath=self.ledgerpath)
         self._web_server = make_server("0.0.0.0", 8080, app)
         self._web_thread = threading.Thread(target=self._web_server.serve_forever, daemon=False)
         self._web_thread.start()

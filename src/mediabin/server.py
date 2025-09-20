@@ -7,24 +7,23 @@ import duckdb
 class ServerStartOptions:
     pass
 
-def create_app(ledgerpath: str, datadir: str):
+def get_datadir(conn: duckdb.DuckDBPyConnection) -> str | None:
+    res = conn.execute("SELECT datadir_location from metadata").fetchone()
+    return res[0] if res else None
+
+
+def create_app(ledgerpath: str):
     app = Flask(__name__)
-    app.config["ledgerpath"] = ledgerpath
-    app.config["datadir"] = datadir
 
     @app.before_request
     def open_db():
-        g.db = duckdb.connect(app.config["ledgerpath"])
+        g.db = duckdb.connect(ledgerpath)
     
     @app.teardown_request
     def close_db(exc):
         db = getattr(g, 'db', None)
         if db:
             db.close()
-
-    @app.get("/ping")
-    def ping():
-        return "pong"
 
     @app.get("/media/list")
     def list_media():
@@ -38,11 +37,13 @@ def create_app(ledgerpath: str, datadir: str):
         row = g.db.execute(
             "SELECT object_path FROM media.media WHERE id=? AND status='complete'", (mid,)
         ).fetchone()
-        if not row:
+        datadir = get_datadir()
+
+        if not row or not datadir:
             abort(404)
-        
+ 
         filepath = os.path.join(row[0], "video.mp4")
-        response = send_from_directory(app.config["datadir"], filepath, mimetype="video/mp4", conditional=True) 
+        response = send_from_directory(datadir, filepath, mimetype="video/mp4", conditional=True) 
         response.headers['Accept-Ranges'] = 'bytes'
         return response
 
