@@ -4,7 +4,7 @@ import os
 import shutil
 
 from mediabin import coloring
-from mediabin.mediabin_daemon import MediabinDaemon
+from mediabin.mediabin_daemon import MediabinDaemon, ServerStartOptions
 from mediabin.daemon import DaemonConnectionError
 
 def format_bytes(size: int) -> str:
@@ -25,12 +25,18 @@ daemon = MediabinDaemon() # Instantiate MediabinDaemon
 @click.option("--stop-service", is_flag=True, help="Stops the mediabin daemon service.")
 @click.option("--restart-service", "-r", is_flag=True, help="Restarts the mediabin daemon service (stops then starts).")
 @click.option("--ledger-path", default=None, help="Path to the DuckDB ledger file.")
+@click.option("--serve", is_flag=True, help="Whether to start the media server")
+@click.option("--port", default=80, help="Whether to start the media server")
+@click.option("--tailscale", is_flag=True, help="Whether to automatically forward to your tailnet on serve")
 def app(
     ctx: click.Context,
     start_service: bool,
     stop_service: bool,
     restart_service: bool,
-    ledger_path: Optional[str]
+    ledger_path: Optional[str],
+    serve: bool,
+    port: int,
+    tailscale: bool
 ):
     """Mediabin CLI for managing media downloads and daemon service."""
     if ctx.invoked_subcommand is not None:
@@ -47,6 +53,15 @@ def app(
             daemon.stop()
         except ProcessLookupError:
             print("no service to stop")
+
+    server_options = None
+    if serve:
+        if tailscale:
+            if not shutil.which("tailscale"):
+                print(coloring.error("tailscale is not in your PATH. Please install it or ensure it's accessible."))
+                raise click.Exit(code=1)
+        server_options = ServerStartOptions(tailscale=tailscale, port=port)
+
     
     if start_service or restart_service:
         if daemon.is_process_running():
@@ -54,7 +69,7 @@ def app(
             raise click.Exit(code=1)
         print("Starting mediabin daemon service...")
         # Pass ledger_path to the spawn method
-        pid = daemon.spawn(ledgerpath=ledger_path)
+        pid = daemon.spawn(ledgerpath=ledger_path, server_options=server_options)
         print(f"Started with pid: {pid}")
 
 
@@ -122,7 +137,7 @@ def main():
         app()
     except DaemonConnectionError:
         print("Cannot connect to Daemon")
-        exit(1)
+        click.Exit(code=1)
 
 if __name__ == "__main__":
     main()

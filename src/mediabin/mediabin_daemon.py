@@ -27,9 +27,14 @@ MEDIABIN_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin")
 # keep constants local to file for easy tuning
 _DB_POLL_INTERVAL = 1.0  # seconds
 
+@dataclass
+class ServerStartOptions:
+    tailscale: bool = False
+    port: int = 80
+
 
 class MediabinDaemon(Daemon):
-    def on_spawn(self, ledgerpath: Optional[str] = None):
+    def on_spawn(self, ledgerpath: Optional[str] = None, server_options: Optional[ServerStartOptions]=None):
         os.makedirs(MEDIABIN_DIRECTORY, exist_ok=True)
         LAST_LEDGERPATH_FILE = os.path.join(MEDIABIN_DIRECTORY, "last_ledgerpath")
 
