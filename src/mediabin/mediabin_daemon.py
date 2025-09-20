@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
 from multiprocessing import process
+import signal
+import traceback
 from mediabin.daemon import Daemon
 import os
 import duckdb
@@ -30,6 +32,16 @@ MEDIABIN_DIRECTORY = os.path.join(HOME_DIRECTORY, ".mediabin")
 
 # keep constants local to file for easy tuning
 _DB_POLL_INTERVAL = 1.0  # seconds
+
+def _fail_proc_wrapper(proc):
+    def wrapper(*args, **kwargs):
+        try:
+            proc(*args, **kwargs)
+        except Exception as e:
+            print(f"Worker thread encountered a critical error: {e}")
+            traceback.print_exc()
+            os.kill(os.getpid(), signal.SIGTERM)
+    return wrapper
 
 
 class MediabinDaemon(Daemon):
@@ -64,12 +76,12 @@ class MediabinDaemon(Daemon):
         self.current_statuses: Dict[str, StatusDownloading | StatusPending] = {}
         self._lock_current_statuses = threading.Lock()
 
-        self._worker_thread = threading.Thread(target=self._worker_thread_proc, daemon=False)
+        self._worker_thread = threading.Thread(target=_fail_proc_wrapper(self._worker_thread_proc), daemon=False)
         self._worker_thread.start()
 
         app = create_app(ledgerpath=self.ledgerpath)
         self._web_server = make_server("localhost", 8080, app)
-        self._web_thread = threading.Thread(target=self._web_server.serve_forever, daemon=False)
+        self._web_thread = threading.Thread(target=_fail_proc_wrapper(self._web_server.serve_forever), daemon=False)
         self._web_thread.start()
 
         self._tailscale_proc = subprocess.Popen(["tailscale", "serve", "--https=443", "localhost:8080"])
@@ -225,6 +237,7 @@ class MediabinDaemon(Daemon):
 
         self._web_thread.join()
         self._worker_thread.join()
+
 
     def _worker_thread_proc(self):
         while not self.exit_event.is_set():
