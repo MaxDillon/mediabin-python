@@ -37,7 +37,7 @@ def create_app(ledgerpath: str):
         row = g.db.execute(
             "SELECT object_path FROM media.media WHERE id=? AND status='complete'", (mid,)
         ).fetchone()
-        datadir = get_datadir()
+        datadir = get_datadir(g.db)
 
         if not row or not datadir:
             abort(404)
