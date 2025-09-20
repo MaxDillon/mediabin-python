@@ -26,10 +26,9 @@ PID_FILE = os.path.join(DAEMON_DIRECTORY, "process.pid")
 SOCKET_FILE = os.path.join(DAEMON_DIRECTORY, "socket.sock")
 
 class TaggedStreamProxy(io.TextIOBase):
-    connections = {}
-    map_isatty = {}
-
     def __init__(self, stream_cls, fallback_log_path):
+        self.connections = {}
+        self.map_isatty = {}
         self.stream_cls = stream_cls
         self.lock = threading.Lock()
         self.fallback_log_path = fallback_log_path
@@ -49,7 +48,9 @@ class TaggedStreamProxy(io.TextIOBase):
         return len(s)
 
     def isatty(self) -> bool:
-        return self.map_isatty.get(threading.get_ident(), False)
+        current_thread_id = threading.get_ident()
+        is_tty = self.map_isatty.get(current_thread_id, False)
+        return is_tty
 
     def flush(self):
         pass  # no-op, writes are already flushed

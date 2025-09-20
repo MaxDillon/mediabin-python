@@ -1,3 +1,4 @@
+import sys
 from typing import Optional
 import click
 import os
@@ -59,14 +60,14 @@ def app(
         if tailscale:
             if not shutil.which("tailscale"):
                 print(coloring.error("tailscale is not in your PATH. Please install it or ensure it's accessible."))
-                raise click.Exit(code=1)
+                raise exit(1)
         server_options = ServerStartOptions(tailscale=tailscale, port=port)
 
     
     if start_service or restart_service:
         if daemon.is_process_running():
             print(f"Daemon is already running")
-            raise click.Exit(code=1)
+            raise exit(1)
         print("Starting mediabin daemon service...")
         # Pass ledger_path to the spawn method
         pid = daemon.spawn(ledgerpath=ledger_path, server_options=server_options)
@@ -137,7 +138,7 @@ def main():
         app()
     except DaemonConnectionError:
         print("Cannot connect to Daemon")
-        click.Exit(code=1)
+        exit(1)
 
 if __name__ == "__main__":
     main()
