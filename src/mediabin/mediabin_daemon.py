@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from multiprocessing import process
 from mediabin.daemon import Daemon
 import os
 import duckdb
@@ -9,6 +10,7 @@ import os
 import duckdb
 from typing import List, Optional, Dict, Tuple
 from werkzeug.serving import make_server
+import subprocess
 
 from mediabin.server import ServerStartOptions, create_app
 from mediabin.ytdlp_downloader import (
@@ -69,6 +71,8 @@ class MediabinDaemon(Daemon):
         self._web_server = make_server("localhost", 8080, app)
         self._web_thread = threading.Thread(target=self._web_server.serve_forever, daemon=False)
         self._web_thread.start()
+
+        self._tailscale_proc = subprocess.Popen(["tailscale", "serve", "--https=443", "localhost:8080"])
 
     def _restart_downloading_jobs(self):
         self.db.execute("UPDATE media.media SET status = 'pending' WHERE status = 'downloading'")
@@ -215,6 +219,8 @@ class MediabinDaemon(Daemon):
                 job.cancel_download()
 
         self._web_server.shutdown()
+        self._tailscale_proc.terminate()
+        self._tailscale_proc.wait()
         self.exit_event.set()
 
         self._web_thread.join()
