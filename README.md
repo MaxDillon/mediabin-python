@@ -46,3 +46,6 @@ CREATE TABLE metadata(
 
 # TODO:
 - [ ] In metadata table, specify how many allowable concurrent downloads
+- [ ] prevent status callback from writing directly to db. Instead enqueue for worker thread to handle
+- [ ] create keepalive duckdb connection for worker thread to use
+- [ ] create new connections as needed in cli commands 
